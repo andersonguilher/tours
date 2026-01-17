@@ -105,8 +105,8 @@ if ($action == 'create') {
     $rules = json_encode($_POST['rules'] ?? []);
 
     try {
-        // Inserção no Banco (Incluindo badge_id)
-        $sql = "INSERT INTO tours (title, description, difficulty, start_date, end_date, banner_url, rules_json, scenery_link, badge_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)";
+        // ATUALIZADO: tabela tour_tours
+        $sql = "INSERT INTO tour_tours (title, description, difficulty, start_date, end_date, banner_url, rules_json, scenery_link, badge_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$title, $desc, $diff, $start_date, $end_date, $bannerPath, $rules, $scenery, $badge_id]);
         
@@ -187,8 +187,8 @@ if ($action == 'update') {
     $rules = json_encode($_POST['rules'] ?? []);
 
     try {
-        // Atualização no Banco (Incluindo badge_id)
-        $sql = "UPDATE tours SET title=?, description=?, difficulty=?, start_date=?, end_date=?, banner_url=?, rules_json=?, scenery_link=?, badge_id=?, status=? WHERE id=?";
+        // ATUALIZADO: tabela tour_tours
+        $sql = "UPDATE tour_tours SET title=?, description=?, difficulty=?, start_date=?, end_date=?, banner_url=?, rules_json=?, scenery_link=?, badge_id=?, status=? WHERE id=?";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$title, $desc, $diff, $start_date, $end_date, $bannerPath, $rules, $scenery, $badge_id, $status, $id]);
         
@@ -210,14 +210,17 @@ if ($action == 'delete') {
         $pdo->beginTransaction();
         
         // 1. Remove histórico e progresso dos pilotos neste tour
-        $pdo->prepare("DELETE FROM pilot_leg_history WHERE tour_id = ?")->execute([$id]); // Opcional: manter histórico? Geralmente deleta-se tudo.
-        $pdo->prepare("DELETE FROM pilot_tour_progress WHERE tour_id = ?")->execute([$id]);
+        // ATUALIZADO: tabelas tour_history e tour_progress
+        $pdo->prepare("DELETE FROM tour_history WHERE tour_id = ?")->execute([$id]); 
+        $pdo->prepare("DELETE FROM tour_progress WHERE tour_id = ?")->execute([$id]);
         
         // 2. Remove as pernas do tour
+        // ATUALIZADO: tabela tour_legs
         $pdo->prepare("DELETE FROM tour_legs WHERE tour_id = ?")->execute([$id]);
         
         // 3. Remove o tour em si
-        $pdo->prepare("DELETE FROM tours WHERE id = ?")->execute([$id]);
+        // ATUALIZADO: tabela tour_tours
+        $pdo->prepare("DELETE FROM tour_tours WHERE id = ?")->execute([$id]);
         
         $pdo->commit();
         

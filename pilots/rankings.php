@@ -10,9 +10,10 @@ if (!is_user_logged_in()) { die('Acesso restrito.'); }
 require '../config/db.php'; 
 
 // 2. Query: Mais Ativos (Tours Completos)
+// ATUALIZADO: tabela tour_progress
 $sqlActive = "
     SELECT pilot_id, COUNT(id) as tours_concluidos
-    FROM pilot_tour_progress
+    FROM tour_progress
     WHERE status = 'Completed'
     GROUP BY pilot_id
     ORDER BY tours_concluidos DESC
@@ -22,10 +23,11 @@ $topActive = $pdo->query($sqlActive)->fetchAll();
 
 // 3. Query: Últimos Voos (Feed em Tempo Real)
 // Mostra as últimas pernas validadas
+// ATUALIZADO: tabelas tour_history e tour_tours
 $sqlLastFlights = "
     SELECT h.*, t.title as tour_title 
-    FROM pilot_leg_history h
-    JOIN tours t ON h.tour_id = t.id
+    FROM tour_history h
+    JOIN tour_tours t ON h.tour_id = t.id
     ORDER BY h.date_flown DESC
     LIMIT 10
 ";

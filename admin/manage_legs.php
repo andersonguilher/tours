@@ -7,11 +7,13 @@ $tour_id = $_GET['tour_id'] ?? 0;
 if ($tour_id == 0) header("Location: index.php");
 
 // Pega info do Tour
-$stmt = $pdo->prepare("SELECT * FROM tours WHERE id = ?");
+// ATUALIZADO: tabela tour_tours
+$stmt = $pdo->prepare("SELECT * FROM tour_tours WHERE id = ?");
 $stmt->execute([$tour_id]);
 $tour = $stmt->fetch();
 
 // Pega as Pernas
+// ATUALIZADO: tabela tour_legs
 $stmtLegs = $pdo->prepare("SELECT * FROM tour_legs WHERE tour_id = ? ORDER BY leg_order ASC");
 $stmtLegs->execute([$tour_id]);
 $legs = $stmtLegs->fetchAll();

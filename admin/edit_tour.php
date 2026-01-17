@@ -11,7 +11,8 @@ if (!is_user_logged_in() || !current_user_can('administrator')) { wp_die('Acesso
 $id = $_GET['id'] ?? 0;
 if ($id == 0) die("ID Inválido");
 
-$stmt = $pdo->prepare("SELECT * FROM tours WHERE id = ?");
+// ATUALIZADO: tabela tour_tours
+$stmt = $pdo->prepare("SELECT * FROM tour_tours WHERE id = ?");
 $stmt->execute([$id]);
 $tour = $stmt->fetch();
 if (!$tour) die("Tour não encontrado");

@@ -55,7 +55,8 @@ $display_callsign = $simbrief_airline . $simbrief_number;
 $tour_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 if (!$tour_id) die("ID Inválido");
 
-$stmt = $pdo->prepare("SELECT * FROM tours WHERE id = ?");
+// ATUALIZADO: tabela tour_tours
+$stmt = $pdo->prepare("SELECT * FROM tour_tours WHERE id = ?");
 $stmt->execute([$tour_id]);
 $tour = $stmt->fetch();
 if (!$tour) die("Tour não encontrado.");
@@ -74,16 +75,19 @@ function getMetar($icao) {
 
 // 5. AÇÃO: INICIAR TOUR
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['start_tour'])) {
-    $check = $pdo->prepare("SELECT id FROM pilot_tour_progress WHERE pilot_id = ? AND tour_id = ?");
+    // ATUALIZADO: tabela tour_progress
+    $check = $pdo->prepare("SELECT id FROM tour_progress WHERE pilot_id = ? AND tour_id = ?");
     $check->execute([$wp_user_id, $tour_id]);
     
     if (!$check->fetch()) {
+        // ATUALIZADO: tabela tour_legs
         $stmtLeg = $pdo->prepare("SELECT id FROM tour_legs WHERE tour_id = ? ORDER BY leg_order ASC LIMIT 1");
         $stmtLeg->execute([$tour_id]);
         $first = $stmtLeg->fetch();
         
         if ($first) {
-            $pdo->prepare("INSERT INTO pilot_tour_progress (pilot_id, tour_id, current_leg_id, status) VALUES (?, ?, ?, 'In Progress')")
+            // ATUALIZADO: tabela tour_progress
+            $pdo->prepare("INSERT INTO tour_progress (pilot_id, tour_id, current_leg_id, status) VALUES (?, ?, ?, 'In Progress')")
                 ->execute([$wp_user_id, $tour_id, $first['id']]);
             header("Location: view_tour.php?id=" . $tour_id);
             exit;
@@ -92,7 +96,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['start_tour'])) {
 }
 
 // 6. STATUS & PERNAS
-$stmtProg = $pdo->prepare("SELECT * FROM pilot_tour_progress WHERE pilot_id = ? AND tour_id = ?");
+// ATUALIZADO: tabela tour_progress
+$stmtProg = $pdo->prepare("SELECT * FROM tour_progress WHERE pilot_id = ? AND tour_id = ?");
 $stmtProg->execute([$wp_user_id, $tour_id]);
 $progress = $stmtProg->fetch();
 
@@ -100,6 +105,7 @@ $currentLegId = $progress ? $progress['current_leg_id'] : 0;
 $tourStatus = $progress ? $progress['status'] : 'Not Started';
 
 // Carrega Pernas
+// ATUALIZADO: tabela tour_legs
 $sqlLegs = "SELECT l.*, dep.name as dep_name, dep.latitude_deg as dep_lat, dep.longitude_deg as dep_lon, dep.municipality as dep_city, dep.flag_url as dep_flag, arr.name as arr_name, arr.latitude_deg as arr_lat, arr.longitude_deg as arr_lon, arr.municipality as arr_city, arr.flag_url as arr_flag FROM tour_legs l LEFT JOIN airports_2 dep ON l.dep_icao = dep.ident LEFT JOIN airports_2 arr ON l.arr_icao = arr.ident WHERE l.tour_id = ? ORDER BY l.leg_order ASC";
 $stmtLegs = $pdo->prepare($sqlLegs);
 $stmtLegs->execute([$tour_id]);

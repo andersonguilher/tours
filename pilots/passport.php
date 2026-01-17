@@ -10,10 +10,11 @@ $wp_user_id = $current_user->ID;
 require '../config/db.php';
 
 // Busca medalhas do piloto
+// ATUALIZADO: tabelas tour_badges e tour_pilot_badges
 $stmtBadges = $pdo->prepare("
     SELECT b.*, pb.awarded_at 
-    FROM badges b 
-    JOIN pilot_badges pb ON b.id = pb.badge_id 
+    FROM tour_badges b 
+    JOIN tour_pilot_badges pb ON b.id = pb.badge_id 
     WHERE pb.pilot_id = ?
     ORDER BY pb.awarded_at DESC
 ");
@@ -21,9 +22,10 @@ $stmtBadges->execute([$wp_user_id]);
 $myBadges = $stmtBadges->fetchAll();
 
 // Busca estatísticas
+// ATUALIZADO: tabela tour_history
 $stmtStats = $pdo->prepare("
     SELECT COUNT(id) as total_legs, MIN(landing_rate) as best_landing 
-    FROM pilot_leg_history WHERE pilot_id = ?
+    FROM tour_history WHERE pilot_id = ?
 ");
 $stmtStats->execute([$wp_user_id]);
 $stats = $stmtStats->fetch();

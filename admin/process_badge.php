@@ -52,7 +52,8 @@ if ($action == 'create') {
         $imagePath = 'https://cdn-icons-png.flaticon.com/512/3176/3176294.png'; // Fallback
     }
 
-    $sql = "INSERT INTO badges (title, description, image_url, condition_type) VALUES (?, ?, ?, ?)";
+    // ATUALIZADO: tabela tour_badges
+    $sql = "INSERT INTO tour_badges (title, description, image_url, condition_type) VALUES (?, ?, ?, ?)";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$title, $desc, $imagePath, $cond]);
     
@@ -70,7 +71,8 @@ if ($action == 'update') {
     $newImage = uploadBadgeImage('image_file');
     $imagePath = $newImage ? $newImage : $_POST['old_image_url'];
 
-    $sql = "UPDATE badges SET title=?, description=?, image_url=?, condition_type=? WHERE id=?";
+    // ATUALIZADO: tabela tour_badges
+    $sql = "UPDATE tour_badges SET title=?, description=?, image_url=?, condition_type=? WHERE id=?";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$title, $desc, $imagePath, $cond, $id]);
     
@@ -83,9 +85,11 @@ if ($action == 'delete') {
     $id = $_POST['id'];
     
     // Primeiro remove as atribuições aos pilotos
-    $pdo->prepare("DELETE FROM pilot_badges WHERE badge_id = ?")->execute([$id]);
+    // ATUALIZADO: tabela tour_pilot_badges
+    $pdo->prepare("DELETE FROM tour_pilot_badges WHERE badge_id = ?")->execute([$id]);
     // Depois remove a medalha
-    $pdo->prepare("DELETE FROM badges WHERE id = ?")->execute([$id]);
+    // ATUALIZADO: tabela tour_badges
+    $pdo->prepare("DELETE FROM tour_badges WHERE id = ?")->execute([$id]);
     
     header("Location: manage_badges.php?msg=deleted");
     exit;

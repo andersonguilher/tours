@@ -54,11 +54,13 @@ try {
 
 // 4. BUSCA TOURS
 try {
-    $stmt = $pdo->query("SELECT * FROM tours WHERE status = 1 ORDER BY start_date DESC, id DESC");
+    // CORREÇÃO: Tabela atualizada para 'tour_tours'
+    $stmt = $pdo->query("SELECT * FROM tour_tours WHERE status = 1 ORDER BY start_date DESC, id DESC");
     $tours = $stmt->fetchAll();
 
     $progresso = [];
-    $stmtProg = $pdo->prepare("SELECT tour_id, status FROM pilot_tour_progress WHERE pilot_id = ?");
+    // CORREÇÃO: Tabela atualizada para 'tour_progress'
+    $stmtProg = $pdo->prepare("SELECT tour_id, status FROM tour_progress WHERE pilot_id = ?");
     $stmtProg->execute([$wp_user_id]);
     while ($row = $stmtProg->fetch()) {
         $progresso[$row['tour_id']] = $row['status'];

@@ -143,11 +143,12 @@ class FlightValidator {
     }
 
     private function getActiveLeg($pilotId) {
+        // ATUALIZADO: tabelas tour_progress, tour_tours, tour_legs
         $sql = "
             SELECT p.id as progress_id, p.current_leg_id, t.rules_json, t.id as tour_real_id, t.title as tour_title,
                    l.dep_icao as leg_dep, l.arr_icao as leg_arr, l.id as leg_real_id, l.leg_order
-            FROM pilot_tour_progress p
-            JOIN tours t ON p.tour_id = t.id
+            FROM tour_progress p
+            JOIN tour_tours t ON p.tour_id = t.id
             JOIN tour_legs l ON p.current_leg_id = l.id
             WHERE p.pilot_id = ? AND p.status = 'In Progress'
         ";
@@ -185,8 +186,9 @@ class FlightValidator {
         try {
             $this->pdoTracker->beginTransaction();
 
+            // ATUALIZADO: tabela tour_history
             $stmtLog = $this->pdoTracker->prepare("
-                INSERT INTO pilot_leg_history (pilot_id, tour_id, leg_id, callsign, aircraft, date_flown, network, landing_rate)
+                INSERT INTO tour_history (pilot_id, tour_id, leg_id, callsign, aircraft, date_flown, network, landing_rate)
                 VALUES (?, ?, ?, ?, ?, NOW(), 'IVAO', ?)
             ");
             $stmtLog->execute([
@@ -198,16 +200,19 @@ class FlightValidator {
                 $landingRate // Salvando NULL
             ]);
 
+            // ATUALIZADO: tabela tour_legs
             $stmtNext = $this->pdoTracker->prepare("SELECT id FROM tour_legs WHERE tour_id = ? AND leg_order > ? ORDER BY leg_order ASC LIMIT 1");
             $stmtNext->execute([$legData['tour_real_id'], $legData['leg_order']]);
             $nextLeg = $stmtNext->fetch(PDO::FETCH_ASSOC);
 
             if ($nextLeg) {
-                $stmtUpd = $this->pdoTracker->prepare("UPDATE pilot_tour_progress SET current_leg_id = ?, status = 'In Progress', last_update = NOW() WHERE id = ?");
+                // ATUALIZADO: tabela tour_progress
+                $stmtUpd = $this->pdoTracker->prepare("UPDATE tour_progress SET current_leg_id = ?, status = 'In Progress', last_update = NOW() WHERE id = ?");
                 $stmtUpd->execute([$nextLeg['id'], $legData['progress_id']]);
                 $this->sendDiscordWebhook($telemetry['callsign'], $legData['tour_title'], "✅ Perna Concluída: {$legData['leg_dep']} -> {$legData['leg_arr']}");
             } else {
-                $stmtUpd = $this->pdoTracker->prepare("UPDATE pilot_tour_progress SET status = 'Completed', completed_at = NOW(), last_update = NOW() WHERE id = ?");
+                // ATUALIZADO: tabela tour_progress
+                $stmtUpd = $this->pdoTracker->prepare("UPDATE tour_progress SET status = 'Completed', completed_at = NOW(), last_update = NOW() WHERE id = ?");
                 $stmtUpd->execute([$legData['progress_id']]);
                 $this->sendDiscordWebhook($telemetry['callsign'], $legData['tour_title'], "🏆 TOUR FINALIZADO! Parabéns comandante.");
             }
@@ -254,7 +259,8 @@ class FlightValidator {
 
     private function assignBadge($pilotId, $tourId, $tourTitle, $callsign) {
         // Busca qual medalha está vinculada a este tour
-        $stmt = $this->pdoTracker->prepare("SELECT badge_id FROM tours WHERE id = ?");
+        // ATUALIZADO: tabela tour_tours
+        $stmt = $this->pdoTracker->prepare("SELECT badge_id FROM tour_tours WHERE id = ?");
         $stmt->execute([$tourId]);
         $tourData = $stmt->fetch();
         
@@ -262,12 +268,14 @@ class FlightValidator {
             $badgeId = $tourData['badge_id'];
             
             // Verifica se o piloto já tem essa medalha para não duplicar
-            $check = $this->pdoTracker->prepare("SELECT id FROM pilot_badges WHERE pilot_id = ? AND badge_id = ?");
+            // ATUALIZADO: tabela tour_pilot_badges
+            $check = $this->pdoTracker->prepare("SELECT id FROM tour_pilot_badges WHERE pilot_id = ? AND badge_id = ?");
             $check->execute([$pilotId, $badgeId]);
             
             if (!$check->fetch()) {
                 // Entrega a medalha
-                $insert = $this->pdoTracker->prepare("INSERT INTO pilot_badges (pilot_id, badge_id, awarded_at) VALUES (?, ?, NOW())");
+                // ATUALIZADO: tabela tour_pilot_badges
+                $insert = $this->pdoTracker->prepare("INSERT INTO tour_pilot_badges (pilot_id, badge_id, awarded_at) VALUES (?, ?, NOW())");
                 $insert->execute([$pilotId, $badgeId]);
                 
                 // Avisa no console e no Discord

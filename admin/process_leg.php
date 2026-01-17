@@ -17,6 +17,7 @@ if ($action == 'add') {
     $route = trim($_POST['route']);
     
     // Descobre qual é o próximo número de ordem (leg_order)
+    // ATUALIZADO: tabela tour_legs
     $stmt = $pdo->prepare("SELECT MAX(leg_order) FROM tour_legs WHERE tour_id = ?");
     $stmt->execute([$tour_id]);
     $maxOrder = $stmt->fetchColumn();
@@ -33,17 +34,17 @@ if ($action == 'add') {
     }
 }
 
-// --- EXCLUIR PERNA (A CORREÇÃO QUE VOCÊ PRECISA) ---
+// --- EXCLUIR PERNA ---
 if ($action == 'delete') {
     $leg_id = $_POST['leg_id'];
 
     try {
         // 1. Deleta a perna
+        // ATUALIZADO: tabela tour_legs
         $stmt = $pdo->prepare("DELETE FROM tour_legs WHERE id = ? AND tour_id = ?");
         $stmt->execute([$leg_id, $tour_id]);
 
-        // 2. Reorganiza a numeração (Opcional, mas recomendado)
-        // Isso evita buracos na numeração (Ex: 1, 2, 4 -> vira 1, 2, 3)
+        // 2. Reorganiza a numeração
         $stmtAll = $pdo->prepare("SELECT id FROM tour_legs WHERE tour_id = ? ORDER BY leg_order ASC");
         $stmtAll->execute([$tour_id]);
         $legs = $stmtAll->fetchAll();
