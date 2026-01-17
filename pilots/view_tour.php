@@ -474,7 +474,17 @@ $rules = json_decode($tour['rules_json'], true);
                                 <div class="text-sm font-bold text-white"><?php echo $fA . $leg['arr_icao']; ?></div>
                             </div>
                         </div>
-
+                        <?php if (!empty($leg['route_string'])): ?>
+                            <div class="mb-3 px-1 group cursor-help">
+                                <div class="flex items-center gap-1 mb-1">
+                                    <i class="fa-solid fa-route text-[10px] text-blue-500"></i>
+                                    <span class="text-[9px] text-slate-500 uppercase font-bold">Rota Recomendada</span>
+                                </div>
+                                <div class="text-[10px] font-mono text-slate-300 bg-black/20 rounded p-1.5 border border-slate-700/50 truncate transition group-hover:text-white group-hover:border-blue-500/30" title="<?php echo htmlspecialchars($leg['route_string']); ?>">
+                                    <?php echo htmlspecialchars($leg['route_string']); ?>
+                                </div>
+                            </div>
+                        <?php endif; ?>
                         <?php if($isCurrent): ?>
                             <div class="mt-3 pt-3 border-t border-slate-700/50 space-y-3">
                                 
