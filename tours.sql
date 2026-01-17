@@ -123,4 +123,19 @@ CREATE TABLE IF NOT EXISTS `tour_pilot_badges` (
     ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- -----------------------------------------------------
+-- Tabela 7: Rastreio ao vivo (SQL)
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS tour_live_sessions (
+    pilot_id INT NOT NULL,
+    tour_id INT NOT NULL,
+    leg_id INT NOT NULL,
+    start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+    state VARCHAR(20) DEFAULT 'Pre-Flight',
+    arrival_checks INT DEFAULT 0 COMMENT 'Contador para confirmar pouso',
+    PRIMARY KEY (pilot_id),
+    UNIQUE KEY unique_flight (pilot_id, tour_id, leg_id)
+);
+
 SET FOREIGN_KEY_CHECKS = 1;
