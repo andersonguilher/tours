@@ -1,7 +1,7 @@
 <?php
 // scripts/validate_flights.php
-// VERSÃO: MULTI-NETWORK (IVAO/VATSIM)
-// Este script valida se o piloto cumpriu a perna baseada nos dados recebidos do wzp.json
+// VERSÃO: MULTI-NETWORK + SESSION PERSISTENCE
+// Resolve o problema de desconexão e reinício do contador de tempo.
 
 define('BASE_PATH', dirname(__DIR__));
 require_once BASE_PATH . '/config/db.php';
@@ -11,12 +11,16 @@ class FlightValidator {
     private $pdoPilots;
     private $settings;
     private $pilotsOnline = [];
-
+    
     // Configurações Padrão
     private $pilotTable = 'Dados_dos_Pilotos';
     private $colIvaoId = 'ivao_id';
     private $colMatricula = 'matricula';
     private $colPilotId = 'id_piloto';
+    
+    // Parâmetros de Validação
+    private $arrivalChecksRequired = 3; // Quantos ciclos parado para confirmar pouso
+    private $landingSpeedThreshold = 5; // Kts (abaixo disso considera parado)
 
     public function __construct($pdoTracker) {
         $this->pdoTracker = $pdoTracker;
@@ -66,26 +70,27 @@ class FlightValidator {
     }
 
     public function fetchNetworkData() {
-        // Caminho absoluto conforme solicitado
         $localPath = '/var/www/kafly_user/data/www/kafly.com.br/mapa/3d/data/wzp.json';
 
         if (file_exists($localPath)) {
+            // Verificação de Stale Data (Arquivo velho)
+            if (time() - filemtime($localPath) > 600) { // 10 minutos
+                $this->log("[WARN] Arquivo wzp.json desatualizado (>10min). Abortando para evitar duplicatas.");
+                return;
+            }
+
             $jsonData = file_get_contents($localPath);
             $data = json_decode($jsonData, true);
             
-            // O wzp.json costuma ser um array raiz de objetos. 
-            // Verificamos se é um array direto ou se está aninhado.
             if (is_array($data)) {
                 if (isset($data[0]['callsign']) || isset($data[0]['id'])) {
-                    // Formato array direto (padrão esperado para o ficheiro wzp.json combinado)
                     $this->pilotsOnline = $data;
                 } elseif (isset($data['clients']['pilots'])) {
-                    // Fallback para formato whazzup padrão
                     $this->pilotsOnline = $data['clients']['pilots'];
                 }
             }
             
-            echo "[INFO] Processando " . count($this->pilotsOnline) . " conexões (Fonte: wzp.json)...\n";
+            echo "[INFO] Processando " . count($this->pilotsOnline) . " conexões...\n";
         } else {
             $this->log("[WARN] Arquivo wzp.json não encontrado em: $localPath");
             return;
@@ -100,61 +105,117 @@ class FlightValidator {
     }
 
     private function processFlight($flight) {
-        // Detecção da Rede e Seleção do ID correto
         $network = isset($flight['network']) ? strtoupper($flight['network']) : 'IVAO';
         
+        // Seleção dinâmica do ID
         if ($network === 'VATSIM') {
-            // Na VATSIM usamos o campo 'id'
             $networkId = $flight['id'] ?? null;
         } else {
-            // Na IVAO usamos o campo 'userId'
             $networkId = $flight['userId'] ?? null;
         }
 
         $liveCallsign = strtoupper($flight['callsign'] ?? '');
-
         if (!$networkId) return;
 
-        // Busca o piloto no banco usando o ID da rede
+        // Verifica Piloto no DB
         $pilotData = $this->getPilotFromDB($networkId);
         if (!$pilotData) return;
 
         $dbCallsign = strtoupper($pilotData[$this->colMatricula]);
-        
-        // Verifica se o callsign voado é igual à matrícula do piloto
         if ($liveCallsign !== $dbCallsign) return;
 
         $pilotId = $pilotData['post_id'] ?? $pilotData[$this->colPilotId] ?? null;
         if (!$pilotId) return;
 
-        echo " -> Analisando {$liveCallsign} (Rede: {$network} | ID: {$networkId})...\n";
-
+        // Dados de Telemetria
         $flightPlan = $flight['flightPlan'] ?? null;
         $lastTrack = $flight['lastTrack'] ?? null;
 
         if (!$flightPlan || !$lastTrack) return;
 
-        // Monta a telemetria unificada
         $telemetry = [
             'callsign'       => $liveCallsign,
             'dep_icao'       => $flightPlan['departureId'] ?? '',
             'arr_icao'       => $flightPlan['arrivalId'] ?? '',
             'aircraft'       => $flightPlan['aircraft']['icaoCode'] ?? ($flightPlan['aircraftId'] ?? ''),
             'state'          => $lastTrack['state'] ?? '', 
-            'on_ground'      => $lastTrack['onGround'] ?? false,
             'groundspeed'    => $lastTrack['groundSpeed'] ?? 0,
             'network'        => $network
         ];
 
+        // Busca Perna Ativa
         $activeLeg = $this->getActiveLeg($pilotId);
         if ($activeLeg) {
-            $this->validateLegRules($activeLeg, $telemetry, $pilotId);
+            echo " -> [Rastreando] {$liveCallsign} (ID: $pilotId) na perna {$activeLeg['leg_dep']} -> {$activeLeg['leg_arr']}\n";
+            $this->manageFlightSession($pilotId, $activeLeg, $telemetry);
         }
     }
 
+    // --- NOVA LÓGICA DE SESSÃO ---
+
+    private function manageFlightSession($pilotId, $legData, $telemetry) {
+        // Validação básica de Rota e Aeronave antes de processar sessão
+        if ($telemetry['dep_icao'] != $legData['leg_dep'] || $telemetry['arr_icao'] != $legData['leg_arr']) {
+            return; // Voo não corresponde à perna ativa
+        }
+
+        // Validação de Aeronave
+        $rules = json_decode($legData['rules_json'], true);
+        if (isset($rules['allowed_aircraft']) && !empty($rules['allowed_aircraft'])) {
+            $allowedRaw = is_array($rules['allowed_aircraft']) ? $rules['allowed_aircraft'] : explode(',', $rules['allowed_aircraft']);
+            $allowed = array_map('trim', $allowedRaw);
+            if (!in_array($telemetry['aircraft'], $allowed)) {
+                echo "    -> Aeronave Incorreta ({$telemetry['aircraft']}). Ignorando.\n";
+                return;
+            }
+        }
+
+        // Busca Sessão Ativa na Memória (DB)
+        $session = $this->getSession($pilotId, $legData['tour_real_id'], $legData['leg_real_id']);
+
+        if (!$session) {
+            // INICIAR NOVA SESSÃO
+            // Cria apenas se estiver voando ou no solo do aeroporto de saída
+            $this->createSession($pilotId, $legData['tour_real_id'], $legData['leg_real_id']);
+            echo "    -> Sessão iniciada. Monitorando voo.\n";
+        } else {
+            // ATUALIZAR SESSÃO EXISTENTE
+            $this->updateSessionHeartbeat($pilotId);
+
+            // VERIFICAÇÃO DE CHEGADA (Debounce)
+            // Se estiver no destino E velocidade < 5kts (parado)
+            if ($telemetry['arr_icao'] == $legData['leg_arr'] && $telemetry['groundspeed'] < $this->landingSpeedThreshold) {
+                
+                $checks = $session['arrival_checks'] + 1;
+                $this->updateArrivalChecks($pilotId, $checks);
+                echo "    -> Validando chegada ({$checks}/{$this->arrivalChecksRequired})...\n";
+
+                if ($checks >= $this->arrivalChecksRequired) {
+                    // CALCULAR TEMPO REAL DE VOO
+                    $startTime = strtotime($session['start_time']);
+                    $durationMinutes = round((time() - $startTime) / 60);
+
+                    // COMPLETAR PERNA
+                    $this->completeLeg($legData, $telemetry, $pilotId, $durationMinutes);
+                    
+                    // LIMPAR SESSÃO
+                    $this->deleteSession($pilotId);
+                }
+
+            } else {
+                // Se o piloto voltar a mover-se (taxi) ou decolar de novo, reseta o contador de chegada
+                if ($session['arrival_checks'] > 0) {
+                    $this->updateArrivalChecks($pilotId, 0);
+                    echo "    -> Movimento detectado. Resetando validação de chegada.\n";
+                }
+            }
+        }
+    }
+
+    // --- MÉTODOS DE BANCO DE DADOS (Helpers) ---
+
     private function getPilotFromDB($networkId) {
         try {
-            // Busca pelo ID da rede (IVAO ID ou VATSIM ID)
             $sql = "SELECT *, {$this->colMatricula} as matricula FROM {$this->pilotTable} WHERE {$this->colIvaoId} = ? LIMIT 1";
             $stmt = $this->pdoPilots->prepare($sql);
             $stmt->execute([$networkId]);
@@ -176,42 +237,56 @@ class FlightValidator {
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
-    private function validateLegRules($legData, $telemetry, $pilotId) {
-        // Verifica aeroportos de saída e chegada
-        if ($telemetry['dep_icao'] != $legData['leg_dep'] || $telemetry['arr_icao'] != $legData['leg_arr']) return;
+    // --- MÉTODOS DE SESSÃO (Persistência) ---
 
-        // Verifica regras de aeronave
-        $rules = json_decode($legData['rules_json'], true);
-        if (isset($rules['allowed_aircraft']) && !empty($rules['allowed_aircraft'])) {
-            $allowedRaw = is_array($rules['allowed_aircraft']) ? $rules['allowed_aircraft'] : explode(',', $rules['allowed_aircraft']);
-            $allowed = array_map('trim', $allowedRaw);
-            if (!in_array($telemetry['aircraft'], $allowed)) {
-                echo "    -> Aeronave Incorreta ({$telemetry['aircraft']}).\n";
-                return;
-            }
-        }
-
-        // Lógica de aterragem completa
-        // Considera landed se status for Landed/On Blocks ou se estiver no chão com baixa velocidade
-        $isLanded = ($telemetry['state'] == 'Landed' || $telemetry['state'] == 'On Blocks' || ($telemetry['on_ground'] && $telemetry['groundspeed'] < 30));
-
-        if ($isLanded) {
-            $this->completeLeg($legData, $telemetry, $pilotId);
-        }
+    private function getSession($pilotId, $tourId, $legId) {
+        try {
+            $stmt = $this->pdoTracker->prepare("SELECT * FROM tour_live_sessions WHERE pilot_id = ? AND tour_id = ? AND leg_id = ?");
+            $stmt->execute([$pilotId, $tourId, $legId]);
+            return $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) { return null; }
     }
 
-    private function completeLeg($legData, $telemetry, $pilotId) {
-        echo "    -> [SUCESSO] {$telemetry['callsign']} completou a perna na rede {$telemetry['network']}.\n";
+    private function createSession($pilotId, $tourId, $legId) {
+        try {
+            // Tenta inserir, se já existir (devido a race condition), ignora
+            $stmt = $this->pdoTracker->prepare("
+                INSERT INTO tour_live_sessions (pilot_id, tour_id, leg_id, start_time, last_seen, arrival_checks)
+                VALUES (?, ?, ?, NOW(), NOW(), 0)
+                ON DUPLICATE KEY UPDATE last_seen = NOW()
+            ");
+            $stmt->execute([$pilotId, $tourId, $legId]);
+        } catch (PDOException $e) { $this->log("Erro ao criar sessão: " . $e->getMessage()); }
+    }
 
-        $landingRate = NULL; // Não disponível no wzp.json padrão
+    private function updateSessionHeartbeat($pilotId) {
+        $stmt = $this->pdoTracker->prepare("UPDATE tour_live_sessions SET last_seen = NOW() WHERE pilot_id = ?");
+        $stmt->execute([$pilotId]);
+    }
+
+    private function updateArrivalChecks($pilotId, $count) {
+        $stmt = $this->pdoTracker->prepare("UPDATE tour_live_sessions SET arrival_checks = ? WHERE pilot_id = ?");
+        $stmt->execute([$count, $pilotId]);
+    }
+
+    private function deleteSession($pilotId) {
+        $stmt = $this->pdoTracker->prepare("DELETE FROM tour_live_sessions WHERE pilot_id = ?");
+        $stmt->execute([$pilotId]);
+    }
+
+    // --- FINALIZAÇÃO ---
+
+    private function completeLeg($legData, $telemetry, $pilotId, $duration) {
+        echo "    -> [SUCESSO] {$telemetry['callsign']} completou a perna (Tempo: {$duration} min).\n";
 
         try {
             $this->pdoTracker->beginTransaction();
 
-            // Insere no histórico com a rede correta
+            // Histórico com Duração Calculada
+            // Nota: Se a coluna flight_time_minutes não existir ainda, remova-a da query ou adicione no DB.
             $stmtLog = $this->pdoTracker->prepare("
-                INSERT INTO tour_history (pilot_id, tour_id, leg_id, callsign, aircraft, date_flown, network, landing_rate)
-                VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)
+                INSERT INTO tour_history (pilot_id, tour_id, leg_id, callsign, aircraft, date_flown, network, landing_rate, flight_time_minutes)
+                VALUES (?, ?, ?, ?, ?, NOW(), ?, NULL, ?)
             ");
             $stmtLog->execute([
                 $pilotId, 
@@ -219,27 +294,23 @@ class FlightValidator {
                 $legData['leg_real_id'], 
                 $telemetry['callsign'], 
                 $telemetry['aircraft'], 
-                $telemetry['network'], // IVAO ou VATSIM
-                $landingRate 
+                $telemetry['network'],
+                $duration
             ]);
 
-            // Verifica se há próxima perna
+            // Atualiza Próxima Perna
             $stmtNext = $this->pdoTracker->prepare("SELECT id FROM tour_legs WHERE tour_id = ? AND leg_order > ? ORDER BY leg_order ASC LIMIT 1");
             $stmtNext->execute([$legData['tour_real_id'], $legData['leg_order']]);
             $nextLeg = $stmtNext->fetch(PDO::FETCH_ASSOC);
 
             if ($nextLeg) {
-                // Atualiza para a próxima perna
                 $stmtUpd = $this->pdoTracker->prepare("UPDATE tour_progress SET current_leg_id = ?, status = 'In Progress', last_update = NOW() WHERE id = ?");
                 $stmtUpd->execute([$nextLeg['id'], $legData['progress_id']]);
-                $this->sendDiscordWebhook($telemetry['callsign'], $legData['tour_title'], "✅ Perna Concluída: {$legData['leg_dep']} -> {$legData['leg_arr']} ({$telemetry['network']})");
+                $this->sendDiscordWebhook($telemetry['callsign'], $legData['tour_title'], "✅ Perna Concluída: {$legData['leg_dep']} -> {$legData['leg_arr']} ({$duration} min)");
             } else {
-                // Finaliza o tour
                 $stmtUpd = $this->pdoTracker->prepare("UPDATE tour_progress SET status = 'Completed', completed_at = NOW(), last_update = NOW() WHERE id = ?");
                 $stmtUpd->execute([$legData['progress_id']]);
                 $this->sendDiscordWebhook($telemetry['callsign'], $legData['tour_title'], "🏆 TOUR FINALIZADO! Parabéns comandante.");
-                
-                // Tenta atribuir medalha se houver
                 $this->assignBadge($pilotId, $legData['tour_real_id'], $legData['tour_title'], $telemetry['callsign']);
             }
 
@@ -290,14 +361,12 @@ class FlightValidator {
         
         if ($tourData && !empty($tourData['badge_id'])) {
             $badgeId = $tourData['badge_id'];
-            
             $check = $this->pdoTracker->prepare("SELECT id FROM tour_pilot_badges WHERE pilot_id = ? AND badge_id = ?");
             $check->execute([$pilotId, $badgeId]);
             
             if (!$check->fetch()) {
                 $insert = $this->pdoTracker->prepare("INSERT INTO tour_pilot_badges (pilot_id, badge_id, awarded_at) VALUES (?, ?, NOW())");
                 $insert->execute([$pilotId, $badgeId]);
-                
                 echo "    -> [MEDALHA] Entregue medalha ID $badgeId para o piloto.\n";
                 $this->sendDiscordWebhook($callsign, $tourTitle, "🎖️ Medalha Conquistada Automaticamente!");
             }
@@ -308,8 +377,6 @@ class FlightValidator {
 if (php_sapi_name() !== 'cli') die("Acesso via linha de comando apenas.");
 
 if (isset($pdo)) {
-    // Nota: O arquivo config/db.php deve criar a variável $pdo. 
-    // Certifique-se que ele conecta ao banco do tracker (tour_progress, etc).
     $validator = new FlightValidator($pdo);
     $validator->fetchNetworkData();
     $validator->runValidation();
