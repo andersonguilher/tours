@@ -1,9 +1,8 @@
 <?php
 // pilots/view_tour.php
-// CENTRAL DE OPERAÇÕES DE TOUR: Mapa + Despacho + SimBrief + METAR + CORREÇÃO DE ERRO CRÍTICO
+// CENTRAL DE OPERAÇÕES DE TOUR: Mapa + Despacho + SimBrief API v1 Full Features
 
 // --- 1. CARREGAMENTO ROBUSTO DO WORDPRESS ---
-// Tenta encontrar o wp-load.php em vários locais possíveis para evitar erro de caminho
 $possiblePaths = [
     __DIR__ . '/../../../wp-load.php',
     __DIR__ . '/../../../../wp-load.php',
@@ -20,17 +19,7 @@ foreach ($possiblePaths as $path) {
 }
 
 if (!$wpLoaded) {
-    // Fallback simples se não achar
     die("Erro Crítico: Não foi possível carregar o WordPress. Verifique o caminho em view_tour.php");
-}
-
-// Ativa exibição de erros APENAS para administradores (para debug)
-if (current_user_can('administrator')) {
-    ini_set('display_errors', 1);
-    ini_set('display_startup_errors', 1);
-    error_reporting(E_ALL);
-} else {
-    ini_set('display_errors', 0);
 }
 
 if (!is_user_logged_in()) { die('Acesso restrito.'); }
@@ -38,7 +27,31 @@ if (!is_user_logged_in()) { die('Acesso restrito.'); }
 $current_user = wp_get_current_user();
 $wp_user_id = $current_user->ID;
 
-// --- 2. CONFIGURAÇÕES E BANCO ---
+// --- 2. INTEGRAÇÃO SIMBRIEF API & PROCESSAMENTO AVANÇADO ---
+require_once '../includes/simbrief.apiv1.php';
+
+$ofpData = null;
+$realRoutePoints = []; // Array para o mapa
+
+if (isset($_GET['ofp_id'])) {
+    $sb = new SimBrief($_GET['ofp_id']);
+    if ($sb->ofp_avail) {
+        $ofpData = $sb->ofp_array;
+        
+        // EXTRAÇÃO DA ROTA REAL (LAT/LON)
+        if (isset($ofpData['navlog']['fix'])) {
+            foreach ($ofpData['navlog']['fix'] as $fix) {
+                $realRoutePoints[] = [
+                    'lat' => floatval($fix['pos_lat']),
+                    'lng' => floatval($fix['pos_long']),
+                    'name' => $fix['ident']
+                ];
+            }
+        }
+    }
+}
+
+// --- 3. CONFIGURAÇÕES E BANCO ---
 $settingsFile = __DIR__ . '/../../settings.json'; 
 $tb_pilotos = 'Dados_dos_Pilotos'; 
 $col_matricula = 'matricula';
@@ -52,14 +65,9 @@ if (file_exists($settingsFile)) {
     if (isset($cols['id_piloto'])) $col_id_piloto = $cols['id_piloto'];
 }
 
-// Carrega conexão do banco (Verifica se existe antes para evitar outro erro fatal)
 $dbPath = __DIR__ . '/../config/db.php';
 if (file_exists($dbPath)) {
     require $dbPath; 
-    
-    // --- CORREÇÃO DE SEGURANÇA ---
-    // Força o PDO a lançar exceções em caso de erro.
-    // Isso é crucial para que o try/catch funcione se a tabela airports_2 não existir.
     if (isset($pdo) && $pdo instanceof PDO) {
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     }
@@ -67,17 +75,14 @@ if (file_exists($dbPath)) {
     die("Erro: Arquivo de configuração de banco de dados não encontrado em $dbPath");
 }
 
-// --- 3. IDENTIFICAÇÃO DO PILOTO (Para SimBrief) ---
+// --- 4. IDENTIFICAÇÃO DO PILOTO ---
 $raw_callsign = "";
 try {
-    // Tenta conectar no banco de pilotos (separado ou mesmo)
-    // Usa as constantes do config/db.php se disponíveis, senão define padrão
     $host_p = defined('DB_SERVERNAME') ? DB_SERVERNAME : 'localhost';
     $user_p = defined('DB_PILOTOS_USER') ? DB_PILOTOS_USER : 'root';
     $pass_p = defined('DB_PILOTOS_PASS') ? DB_PILOTOS_PASS : '';
     $name_p = defined('DB_PILOTOS_NAME') ? DB_PILOTOS_NAME : 'u378005298_hEatD';
 
-    // Apenas tenta conectar se não for o mesmo banco do PDO principal, ou cria nova conexão
     $pdoPilots = new PDO("mysql:host=$host_p;dbname=$name_p;charset=utf8mb4", $user_p, $pass_p);
     $pdoPilots->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
@@ -86,18 +91,16 @@ try {
     $res = $stmt->fetch(PDO::FETCH_ASSOC);
     $raw_callsign = ($res) ? strtoupper($res[$col_matricula]) : strtoupper($current_user->user_login);
 } catch (Exception $e) {
-    // Se falhar a conexão com banco de pilotos, usa o login do WP como fallback
     $raw_callsign = strtoupper($current_user->user_login);
 }
 
-// Formata para SimBrief (3 letras ICAO + Numero)
 $simbrief_airline = substr($raw_callsign, 0, 3);
 $simbrief_number = preg_replace('/[^0-9]/', '', substr($raw_callsign, 3));
-if (strlen($simbrief_airline) < 3) $simbrief_airline = 'KFY'; // Fallback
+if (strlen($simbrief_airline) < 3) $simbrief_airline = 'KFY'; 
 if (empty($simbrief_number)) $simbrief_number = '0001';
 $display_callsign = $simbrief_airline . $simbrief_number;
 
-// --- 4. DADOS DO TOUR ---
+// --- 5. DADOS DO TOUR ---
 $tour_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 if (!$tour_id) die("ID Inválido");
 
@@ -107,14 +110,8 @@ $tour = $stmt->fetch();
 if (!$tour) die("Tour não encontrado.");
 
 // Helpers
-function formatarData($date) {
-    if (!$date) return "Indefinido";
-    return date("d/m/Y", strtotime($date));
-}
-
 function getMetar($icao) {
-    // API Simples da VATSIM (Pública e gratuita)
-    // Usa curl se file_get_contents estiver bloqueado
+    // Fallback se não tiver SimBrief data
     if (function_exists('curl_init')) {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, "https://metar.vatsim.net/metar.php?id=" . $icao);
@@ -125,10 +122,10 @@ function getMetar($icao) {
     } else {
         $metar = @file_get_contents("https://metar.vatsim.net/metar.php?id=" . $icao);
     }
-    return $metar ? trim($metar) : "Dados meteorológicos indisponíveis.";
+    return $metar ? trim($metar) : "N/A";
 }
 
-// --- 5. AÇÃO: INICIAR TOUR ---
+// --- 6. AÇÃO: INICIAR TOUR ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['start_tour'])) {
     $check = $pdo->prepare("SELECT id FROM tour_progress WHERE pilot_id = ? AND tour_id = ?");
     $check->execute([$wp_user_id, $tour_id]);
@@ -141,14 +138,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['start_tour'])) {
         if ($first) {
             $pdo->prepare("INSERT INTO tour_progress (pilot_id, tour_id, current_leg_id, status) VALUES (?, ?, ?, 'In Progress')")
                 ->execute([$wp_user_id, $tour_id, $first['id']]);
-            // Refresh na página
             echo "<script>window.location.href='view_tour.php?id=$tour_id';</script>";
             exit;
         }
     }
 }
 
-// --- 6. STATUS E PERNAS ---
+// --- 7. STATUS E PERNAS ---
 $stmtProg = $pdo->prepare("SELECT * FROM tour_progress WHERE pilot_id = ? AND tour_id = ?");
 $stmtProg->execute([$wp_user_id, $tour_id]);
 $progress = $stmtProg->fetch();
@@ -156,13 +152,8 @@ $progress = $stmtProg->fetch();
 $currentLegId = $progress ? $progress['current_leg_id'] : 0;
 $tourStatus = $progress ? $progress['status'] : 'Not Started';
 
-// --- CORREÇÃO DO ERRO CRÍTICO AQUI ---
-// Tentamos buscar com os dados do aeroporto (tabela airports_2).
-// Se a tabela não existir, capturamos o erro e buscamos sem ela.
-
 $allLegs = [];
 try {
-    // Tenta query completa com JOIN
     $sqlLegs = "SELECT l.*, 
                 dep.name as dep_name, dep.latitude_deg as dep_lat, dep.longitude_deg as dep_lon, dep.municipality as dep_city, dep.flag_url as dep_flag, 
                 arr.name as arr_name, arr.latitude_deg as arr_lat, arr.longitude_deg as arr_lon, arr.municipality as arr_city, arr.flag_url as arr_flag 
@@ -172,16 +163,10 @@ try {
                 WHERE l.tour_id = ? ORDER BY l.leg_order ASC";
     
     $stmtLegs = $pdo->prepare($sqlLegs);
-    
-    // VERIFICAÇÃO EXTRA: Se prepare retornar false (erro), lançamos exceção manualmente
-    if (!$stmtLegs) {
-        throw new PDOException("Falha ao preparar query (Tabela airports_2 inexistente?)");
-    }
-
+    if (!$stmtLegs) throw new PDOException("Falha ao preparar query");
     $stmtLegs->execute([$tour_id]);
     $allLegs = $stmtLegs->fetchAll();
 } catch (PDOException $e) {
-    // SE DER ERRO (Tabela airports_2 não existe), roda query simples (FALLBACK)
     $sqlLegsFallback = "SELECT l.*, 
                         l.dep_icao as dep_name, '' as dep_lat, '' as dep_lon, '' as dep_city, '' as dep_flag,
                         l.arr_icao as arr_name, '' as arr_lat, '' as arr_lon, '' as arr_city, '' as arr_flag
@@ -190,14 +175,8 @@ try {
     $stmtLegs = $pdo->prepare($sqlLegsFallback);
     $stmtLegs->execute([$tour_id]);
     $allLegs = $stmtLegs->fetchAll();
-    
-    // Opcional: Avisar admin no topo
-    if (current_user_can('administrator')) {
-        echo "<div style='background:red;color:white;text-align:center;padding:5px;'>Aviso Admin: Tabela 'airports_2' não encontrada. Modo simplificado ativo.</div>";
-    }
 }
 
-// Descobre a ordem atual para colorir o mapa
 $currentLegOrder = 0;
 if ($progress) {
     if ($tourStatus == 'Completed') {
@@ -212,14 +191,10 @@ if ($progress) {
     }
 }
 
-// GERA JSON PARA O MAPA (Leaflet)
-// Só adiciona ao mapa se tiver coordenadas (modo fallback não tem)
+// GERA JSON PARA O MAPA
 $mapSegments = [];
-$hasCoordinates = false;
-
 foreach($allLegs as $leg) {
     if (!empty($leg['dep_lat']) && !empty($leg['dep_lon']) && !empty($leg['arr_lat']) && !empty($leg['arr_lon'])) {
-        $hasCoordinates = true;
         $status = 'locked'; 
         if ($progress) {
             if ($leg['id'] == $currentLegId && $tourStatus != 'Completed') {
@@ -236,17 +211,7 @@ foreach($allLegs as $leg) {
     }
 }
 $jsMapSegments = json_encode($mapSegments);
-
-function getSimBriefLink($leg, $airline, $fltnum) {
-    return "https://dispatch.simbrief.com/options/custom?" . http_build_query([
-        'airline' => $airline, 
-        'fltnum' => $fltnum, 
-        'orig' => $leg['dep_icao'], 
-        'dest' => $leg['arr_icao'], 
-        'route' => $leg['route_string'], 
-        'static_id' => 'TOUR_'.$leg['tour_id']
-    ]);
-}
+$jsRealRoute = json_encode($realRoutePoints); // Passa a rota real para o JS
 $rules = json_decode($tour['rules_json'], true);
 ?>
 
@@ -264,18 +229,148 @@ $rules = json_decode($tour['rules_json'], true);
         ::-webkit-scrollbar-track { background: #0f172a; } 
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
         .flag-icon { width: 20px; height: 14px; object-fit: cover; border-radius: 2px; display: inline-block; }
-        .glass-card { background: rgba(15, 23, 42, 0.90); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
         .btn-glow { animation: glow 2s infinite; }
         @keyframes glow { 0% { box-shadow: 0 0 5px #22c55e; } 50% { box-shadow: 0 0 20px #22c55e; } 100% { box-shadow: 0 0 5px #22c55e; } }
+        
         .custom-tooltip {
             background-color: rgba(15, 23, 42, 0.95) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important;
             color: white !important; border-radius: 8px !important; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5) !important;
         }
         .custom-tooltip::before { border-top-color: rgba(15, 23, 42, 0.95) !important; }
         .tooltip-content { padding: 8px 12px; text-align: center; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+
+        /* Remove o estilo padrão branco quadrado do Leaflet */
+        .leaflet-tooltip {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            color: white !important;
+        }
+        /* Seta do tooltip */
+        .leaflet-tooltip-top:before {
+            border-top-color: rgba(15, 23, 42, 0.9) !important; /* Cor do slate-900 */
+        }        
     </style>
 </head>
 <body class="bg-slate-950 text-white h-screen flex flex-col font-sans overflow-hidden">
+
+<?php if ($ofpData): ?>
+    <div id="sb-modal" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+        <div class="bg-slate-900 border border-blue-500/50 rounded-xl shadow-2xl max-w-5xl w-full overflow-hidden flex flex-col max-h-[90vh]">
+            
+            <div class="bg-gradient-to-r from-blue-900 to-slate-900 p-4 flex justify-between items-center border-b border-blue-500/30 shrink-0">
+                <div class="flex items-center gap-4">
+                    <div class="bg-blue-600 px-3 py-1 rounded text-sm font-bold shadow"><?php echo $ofpData['general']['icao_airline'] . $ofpData['general']['flight_number']; ?></div>
+                    <div class="text-white font-bold text-lg flex items-center gap-2">
+                        <span><?php echo $ofpData['origin']['icao_code']; ?></span>
+                        <i class="fa-solid fa-plane text-sm text-slate-400"></i>
+                        <span><?php echo $ofpData['destination']['icao_code']; ?></span>
+                    </div>
+                </div>
+                
+                <button onclick="document.getElementById('sb-modal').remove(); window.history.replaceState({}, document.title, window.location.pathname + '?id=<?php echo $tour_id; ?>');" 
+                        class="text-slate-400 hover:text-white transition bg-slate-800 hover:bg-red-600 rounded-full w-8 h-8 flex items-center justify-center cursor-pointer shadow-lg border border-slate-700">
+                    <i class="fa-solid fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="p-6 overflow-y-auto custom-scrollbar">
+                
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+                        <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1"><i class="fa-solid fa-gas-pump"></i> Block Fuel</div>
+                        <div class="text-2xl font-mono font-bold text-green-400"><?php echo $ofpData['fuel']['plan_ramp']; ?> <span class="text-xs text-slate-500">KG</span></div>
+                    </div>
+                    <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+                        <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1"><i class="fa-solid fa-stopwatch"></i> Trip Time</div>
+                        <div class="text-2xl font-mono font-bold text-blue-400"><?php echo gmdate("H:i", $ofpData['times']['est_time_enroute']); ?></div>
+                    </div>
+                    <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+                        <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1"><i class="fa-solid fa-weight-hanging"></i> Est. ZFW</div>
+                        <div class="text-2xl font-mono font-bold text-white"><?php echo $ofpData['weights']['est_zfw']; ?> <span class="text-xs text-slate-500">KG</span></div>
+                    </div>
+                    <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+                        <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1"><i class="fa-solid fa-plane-departure"></i> Est. TOW</div>
+                        <div class="text-2xl font-mono font-bold text-yellow-400"><?php echo $ofpData['weights']['est_tow']; ?> <span class="text-xs text-slate-500">KG</span></div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div class="bg-slate-900 border border-slate-700 rounded p-3">
+                        <div class="text-[10px] text-blue-400 font-bold uppercase mb-2">Pistas Previstas</div>
+                        <div class="flex justify-between items-center text-sm font-mono">
+                            <div><span class="text-slate-500">DEP:</span> <span class="text-white font-bold"><?php echo $ofpData['origin']['plan_rwy']; ?></span></div>
+                            <i class="fa-solid fa-arrow-right text-slate-600 text-xs"></i>
+                            <div><span class="text-slate-500">ARR:</span> <span class="text-white font-bold"><?php echo $ofpData['destination']['plan_rwy']; ?></span></div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-slate-900 border border-slate-700 rounded p-3">
+                        <div class="text-[10px] text-blue-400 font-bold uppercase mb-2">Carregamento</div>
+                        <div class="flex justify-around items-center text-sm">
+                            <div class="text-center">
+                                <i class="fa-solid fa-users text-slate-500 mb-1 block"></i>
+                                <span class="font-bold"><?php echo $ofpData['general']['passengers']; ?></span> <span class="text-[10px] text-slate-500">PAX</span>
+                            </div>
+                            <div class="text-center">
+                                <i class="fa-solid fa-box text-slate-500 mb-1 block"></i>
+                                <span class="font-bold"><?php echo $ofpData['weights']['cargo']; ?></span> <span class="text-[10px] text-slate-500">KG</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-900 border border-slate-700 rounded p-3">
+                         <div class="text-[10px] text-blue-400 font-bold uppercase mb-2">Alternativo</div>
+                         <div class="flex items-center gap-3">
+                             <div class="text-xl font-bold text-red-400"><?php echo $ofpData['alternate']['icao_code']; ?></div>
+                             <div class="text-xs text-slate-400">
+                                 <div>Fuel: <?php echo $ofpData['alternate']['burn']; ?> KG</div>
+                                 <div>FL<?php echo $ofpData['alternate']['plan_alt']; ?></div>
+                             </div>
+                         </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-950 p-4 rounded border border-slate-800 font-mono text-xs text-slate-300 break-all mb-6 relative">
+                    <div class="absolute top-0 left-0 bg-blue-600 text-[9px] font-bold px-2 py-0.5 rounded-br text-white">ROTA</div>
+                    <div class="mt-3 leading-relaxed"><?php echo $ofpData['general']['route']; ?></div>
+                </div>
+
+                <div class="space-y-2 mb-6">
+                    <div class="text-[10px] text-slate-500 uppercase font-bold">Meteorologia Atual</div>
+                    <div class="bg-black/30 p-2 rounded border-l-2 border-green-500 text-[10px] font-mono text-slate-300">
+                        <strong class="text-green-500"><?php echo $ofpData['origin']['icao_code']; ?>:</strong> <?php echo $ofpData['weather']['orig_metar']; ?>
+                    </div>
+                    <div class="bg-black/30 p-2 rounded border-l-2 border-blue-500 text-[10px] font-mono text-slate-300">
+                        <strong class="text-blue-500"><?php echo $ofpData['destination']['icao_code']; ?>:</strong> <?php echo $ofpData['weather']['dest_metar']; ?>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap gap-3 justify-end pt-4 border-t border-slate-800">
+                    <button onclick="document.getElementById('sb-modal').remove(); window.history.replaceState({}, document.title, window.location.pathname + '?id=<?php echo $tour_id; ?>');" class="md:hidden bg-slate-700 text-white font-bold py-2 px-4 rounded text-sm">
+                        Fechar Janela
+                    </button>
+                    
+                    <a href="<?php echo $ofpData['files']['pdf']['link']; ?>" target="_blank" class="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-6 rounded transition shadow-lg hover:shadow-red-900/20">
+                        <i class="fa-solid fa-file-pdf"></i> PDF Oficial
+                    </a>
+                    
+                    <div class="h-10 w-px bg-slate-700 mx-2 hidden md:block"></div>
+
+                    <a href="<?php echo $ofpData['prefile']['vatsim']['link']; ?>" target="_blank" class="flex items-center gap-2 bg-slate-700 hover:bg-green-600 text-white font-bold py-2 px-4 rounded transition text-sm">
+                        <i class="fa-solid fa-paper-plane"></i> VATSIM
+                    </a>
+                     <a href="<?php echo $ofpData['prefile']['ivao']['link']; ?>" target="_blank" class="flex items-center gap-2 bg-slate-700 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded transition text-sm">
+                        <i class="fa-solid fa-paper-plane"></i> IVAO
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <div class="h-16 bg-slate-900 border-b border-slate-800 flex justify-between items-center px-6 z-50 shrink-0 shadow-lg">
         <div class="flex items-center gap-4">
@@ -349,7 +444,6 @@ $rules = json_decode($tour['rules_json'], true);
                         $fD = $leg['dep_flag'] ? "<img src='{$leg['dep_flag']}' class='flag-icon mr-1 opacity-80'>" : "";
                         $fA = $leg['arr_flag'] ? "<img src='{$leg['arr_flag']}' class='flag-icon mr-1 opacity-80'>" : "";
                         
-                        // Estilos
                         if ($isCurrent) {
                             $cardClass = "bg-slate-800 border border-blue-500 shadow-lg shadow-blue-900/20 relative overflow-hidden";
                             $iconStatus = "<span class='text-[9px] bg-blue-600 text-white px-2 py-0.5 rounded font-bold animate-pulse'>PRÓXIMA</span>";
@@ -390,9 +484,11 @@ $rules = json_decode($tour['rules_json'], true);
                                 </div>
 
                                 <div class="grid grid-cols-2 gap-2">
-                                    <a href="<?php echo getSimBriefLink($leg, $simbrief_airline, $simbrief_number); ?>" target="_blank" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 rounded text-center shadow transition flex items-center justify-center gap-1">
-                                        <i class="fa-solid fa-cloud-arrow-up"></i> SimBrief OFP
-                                    </a>
+                                    <button onclick="generateOFP('<?php echo $leg['dep_icao']; ?>', '<?php echo $leg['arr_icao']; ?>', '<?php echo $leg['route_string']; ?>', '<?php echo $rules['allowed_aircraft'] ?? ''; ?>')" 
+                                            class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 rounded text-center shadow transition flex items-center justify-center gap-1 w-full btn-glow">
+                                        <i class="fa-solid fa-cloud-bolt"></i> Gerar OFP (API)
+                                    </button>
+
                                     <?php if(!empty($tour['scenery_link'])): ?>
                                     <a href="<?php echo htmlspecialchars($tour['scenery_link']); ?>" target="_blank" class="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2 rounded text-center shadow transition">
                                         <i class="fa-solid fa-map"></i> Cenário
@@ -443,19 +539,50 @@ $rules = json_decode($tour['rules_json'], true);
             <div class="absolute bottom-6 right-6 z-[400] bg-slate-900/90 backdrop-blur px-4 py-2 rounded-lg text-xs text-slate-300 border border-slate-700 shadow-xl">
                 <div class="flex items-center gap-2 mb-1"><div class="w-3 h-1 bg-yellow-400"></div> Ativo</div>
                 <div class="flex items-center gap-2 mb-1"><div class="w-3 h-1 bg-green-500"></div> Voado</div>
-                <div class="flex items-center gap-2"><div class="w-3 h-1 bg-slate-600 border border-slate-500 border-dashed"></div> Pendente</div>
+                <div class="flex items-center gap-2 mb-1"><div class="w-3 h-1 bg-slate-600 border border-slate-500 border-dashed"></div> Pendente</div>
+                <?php if($ofpData): ?><div class="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700 text-pink-400"><i class="fa-solid fa-route"></i> Rota Real SimBrief</div><?php endif; ?>
             </div>
         </div>
     </div>
 
+    <form id="sbapiform" style="display:none;">
+        <input type="text" name="orig">
+        <input type="text" name="dest">
+        <input type="text" name="route">
+        <input type="text" name="type">
+        <input type="text" name="airline" value="<?php echo $simbrief_airline; ?>">
+        <input type="text" name="fltnum" value="<?php echo $simbrief_number; ?>">
+        <input type="text" name="units" value="KGS"> 
+        <input type="text" name="navlog" value="1">
+        <input type="text" name="static_id" value="TOUR_<?php echo $tour_id; ?>">
+        <input type="text" name="cpt" value="<?php echo $current_user->display_name; ?>">
+    </form>
+
+    <script src="../scripts/simbrief.apiv1.js"></script>
+    <script>
+        var api_dir = '../includes/';
+
+        function generateOFP(dep, arr, route, acft) {
+            let aircraftType = acft.split(',')[0].trim();
+            if(!aircraftType || aircraftType === "Livre") aircraftType = "B738";
+
+            document.getElementsByName('orig')[0].value = dep;
+            document.getElementsByName('dest')[0].value = arr;
+            document.getElementsByName('route')[0].value = route;
+            document.getElementsByName('type')[0].value = aircraftType;
+            
+            simbriefsubmit(window.location.href);
+        }
+    </script>
+
     <script>
         const segments = <?php echo $jsMapSegments; ?>;
-        // Inicializa Mapa
+        const realRoute = <?php echo $jsRealRoute; ?>; // Pontos da rota real
+        
         var map = L.map('map', {zoomControl: false, scrollWheelZoom: true, attributionControl: false});
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 18 }).addTo(map);
         L.control.zoom({position: 'topright'}).addTo(map);
 
-        // Função Curva da Terra (Geodésica)
         function getGreatCirclePoints(start, end, numPoints = 60) {
             function toRad(deg) { return deg * Math.PI / 180; }
             function toDeg(rad) { return rad * 180 / Math.PI; }
@@ -479,7 +606,12 @@ $rules = json_decode($tour['rules_json'], true);
 
         var bounds = L.latLngBounds();
         
+        // 1. Desenha os segmentos do Tour (Linhas curvas entre aeroportos)
         if (segments.length > 0) {
+            
+            // Verifica se temos uma rota real carregada para esta sessão
+            const hasRealRoute = (typeof realRoute !== 'undefined' && realRoute.length > 0);
+
             segments.forEach(seg => {
                 var curvePoints = getGreatCirclePoints(seg.start, seg.end);
                 
@@ -487,8 +619,15 @@ $rules = json_decode($tour['rules_json'], true);
                 if (seg.status === 'active') { color = '#fbbf24'; weight = 3; opacity = 1; dash = '8, 8'; } 
                 else if (seg.status === 'completed') { color = '#10b981'; weight = 3; opacity = 1; dash = null; }
 
-                L.polyline(curvePoints, {color: color, weight: weight, opacity: opacity, dashArray: dash}).addTo(map);
-                
+                // --- LÓGICA DE OCULTAÇÃO DA LINHA AMARELA ---
+                // Se temos a Rota Real (SimBrief) E esta é a perna ativa, NÃO desenhamos a linha curva amarela.
+                // Desenhamos a linha apenas se: (Não tem rota real) OU (A perna não é a ativa)
+                if (!hasRealRoute || seg.status !== 'active') {
+                    L.polyline(curvePoints, {color: color, weight: weight, opacity: opacity, dashArray: dash}).addTo(map);
+                }
+
+                // --- MARCADORES DOS AEROPORTOS (Sempre desenha) ---
+                // Mantemos os pontos de origem/destino mesmo se a linha sumir, para mostrar as bandeiras e infos
                 const createTooltip = (point) => {
                     let html = "<div class='tooltip-content'>";
                     if(point.flag) html += `<img src='${point.flag}' class='w-6 h-4 mb-1 mx-auto rounded shadow-sm block'>`;
@@ -504,9 +643,61 @@ $rules = json_decode($tour['rules_json'], true);
                 L.circleMarker([seg.end.lat, seg.end.lon], {radius: 3, color: '#fff', fillColor: '#3b82f6', fillOpacity: 1})
                  .bindTooltip(createTooltip(seg.end), {className: 'custom-tooltip', direction: 'top', offset: [0, -5]}).addTo(map);
                 
-                bounds.extend(curvePoints);
+                // Se não tiver rota real, o mapa foca baseado nessas curvas
+                if (!hasRealRoute) {
+                    bounds.extend(curvePoints);
+                }
             });
-            map.fitBounds(bounds, {padding: [80, 80]});
+        }
+
+        // 2. Desenha a ROTA REAL IMPORTADA (Estilo Radar Moderno)
+        if (typeof realRoute !== 'undefined' && realRoute.length > 0) {
+            
+            var routeLatLons = realRoute.map(p => [p.lat, p.lng]);
+            
+            // A) Efeito "Glow" (Sombra colorida larga e transparente)
+            L.polyline(routeLatLons, {
+                color: '#f472b6', // Rosa claro
+                weight: 10,       // Largura maior
+                opacity: 0.2,     // Bem transparente
+                lineCap: 'round'
+            }).addTo(map);
+
+            // B) Linha Principal (Núcleo fino e sólido)
+            var polyline = L.polyline(routeLatLons, {
+                color: '#ec4899', // Rosa Pink vibrante
+                weight: 3,
+                opacity: 1,
+                dashArray: null   // Linha sólida
+            }).addTo(map);
+
+            // C) Adicionar pontos nos Waypoints (Fixos)
+            realRoute.forEach((point, index) => {
+                // Pula o primeiro e último (já são os aeroportos) para não poluir
+                if (index === 0 || index === realRoute.length - 1) return;
+
+                L.circleMarker([point.lat, point.lng], {
+                    radius: 3,              // Ponto pequeno
+                    color: 'transparent',   // Sem borda
+                    fillColor: '#fff',      // Miolo branco
+                    fillOpacity: 0.8        
+                }).bindTooltip(
+                    `<div class="font-bold text-xs text-pink-400 font-mono tracking-widest">${point.name}</div>`, 
+                    {
+                        permanent: false,   // Só aparece ao passar o mouse
+                        direction: 'top',
+                        className: 'bg-slate-900 border border-pink-500/30 px-2 py-1 rounded shadow-xl' // Tailwind classes
+                    }
+                ).addTo(map);
+            });
+            
+            // D) Ajusta o zoom para focar na rota real com margem confortável
+            var realBounds = L.latLngBounds(routeLatLons);
+            map.fitBounds(realBounds, {paddingTopLeft: [50, 50], paddingBottomRight: [50, 50]});
+
+        } else if (segments.length > 0) {
+             // Fallback para rota padrão se não houver SimBrief
+             map.fitBounds(bounds, {padding: [80, 80]});
         } else {
             map.setView([20, -40], 3); 
         }
