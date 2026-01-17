@@ -1,0 +1,180 @@
+<?php
+// validate_flights.php
+// FINAL VERSION: Dual Database Connection (Pilots DB + Tracker DB)
+// Runs via Cron every 2 minutes
+
+define('BASE_PATH', '/var/www/kafly_user/data/www/kafly.com.br');
+
+// 1. Load Tracker Database Connection ($pdo)
+require BASE_PATH . '/dash/tours/config/db.php'; 
+
+// 2. Load Settings & Create Pilot Database Connection
+$settingsPath = BASE_PATH . '/dash/settings.json';
+$tb_pilotos = 'Dados_dos_Pilotos';
+$col_vid    = 'ivao_id'; // Default to IVAO ID column
+$col_matr   = 'matricula';
+
+// Load settings.json to get table/column names
+if (file_exists($settingsPath)) {
+    $settings = json_decode(file_get_contents($settingsPath), true);
+    if (isset($settings['database_mappings']['pilots_table'])) 
+        $tb_pilotos = $settings['database_mappings']['pilots_table'];
+    
+    $cols = $settings['database_mappings']['columns'] ?? [];
+    if (isset($cols['ivao_id'])) $col_vid = $cols['ivao_id'];
+    if (isset($cols['matricula'])) $col_matr = $cols['matricula'];
+}
+
+// Create connection to the MAIN database (where pilots register)
+try {
+    // These constants come from the included config/db.php (which loads config_db.php)
+    $host_p = defined('DB_SERVERNAME') ? DB_SERVERNAME : 'localhost';
+    $user_p = defined('DB_PILOTOS_USER') ? DB_PILOTOS_USER : 'root';
+    $pass_p = defined('DB_PILOTOS_PASS') ? DB_PILOTOS_PASS : '';
+    $name_p = defined('DB_PILOTOS_NAME') ? DB_PILOTOS_NAME : 'u378005298_hEatD';
+
+    $pdoPilots = new PDO("mysql:host=$host_p;dbname=$name_p;charset=utf8mb4", $user_p, $pass_p);
+    $pdoPilots->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    echo "Connected to Pilot DB: $name_p\n";
+
+} catch (PDOException $e) {
+    die("CRITICAL ERROR: Could not connect to Pilot Database. " . $e->getMessage());
+}
+
+// 3. Load Network Data (Whazzup)
+$whazzupPath = BASE_PATH . '/skymetrics/api/whazzup.json';
+if (!file_exists($whazzupPath)) die("Error: whazzup.json not found.");
+
+$data = json_decode(file_get_contents($whazzupPath), true);
+$pilotsOnline = [];
+
+if (isset($data[0]['clients']['pilots'])) {
+    $pilotsOnline = $data[0]['clients']['pilots']; 
+} elseif (isset($data['clients']['pilots'])) {
+    $pilotsOnline = $data['clients']['pilots']; 
+}
+
+echo "Processing " . count($pilotsOnline) . " online connections...\n";
+
+// 4. Validation Loop
+foreach ($pilotsOnline as $flight) {
+    
+    $networkId = $flight['userId'] ?? null; // VID
+    $liveCallsign = strtoupper($flight['callsign'] ?? '');
+    
+    if (!$networkId) continue;
+
+    // --- A. Identify Pilot in MAIN DB ---
+    // We look for the VID in the pilot table to get their internal ID and registered callsign
+    try {
+        // We need the internal ID (id_piloto or post_id) to link to the Tour progress
+        // Let's grab both just in case
+        $sql = "SELECT id_piloto, post_id, $col_matr as matricula FROM $tb_pilotos WHERE $col_vid = ? LIMIT 1";
+        $stmtPilot = $pdoPilots->prepare($sql);
+        $stmtPilot->execute([$networkId]);
+        $pilotDB = $stmtPilot->fetch(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        echo "SQL Error searching pilot: " . $e->getMessage() . "\n";
+        continue;
+    }
+
+    if (!$pilotDB) continue; // Not a registered pilot
+
+    // Use the ID that matches your WP ID structure (likely post_id or id_piloto)
+    // IMPORTANT: The tour progress table uses the WP User ID. 
+    // Ensure this variable matches what you used in view_tour.php ($wp_user_id)
+    $pilotId = $pilotDB['post_id'] ?? $pilotDB['id_piloto']; 
+    $dbCallsign = strtoupper($pilotDB['matricula']);
+
+    // --- B. Validate Callsign ---
+    if ($liveCallsign !== $dbCallsign) {
+        echo " -> Pilot ID $pilotId flying with wrong callsign ($liveCallsign). Expected: $dbCallsign. Skipping.\n";
+        continue; 
+    }
+
+    echo " -> Validating $liveCallsign (ID: $pilotId)...\n";
+
+    $flightPlan = $flight['flightPlan'] ?? null;
+    $lastTrack  = $flight['lastTrack'] ?? null;
+
+    if (!$flightPlan || !$lastTrack) continue;
+
+    $pilotData = [
+        'callsign'      => $liveCallsign,
+        'dep_icao'      => $flightPlan['departureId'] ?? '',
+        'arr_icao'      => $flightPlan['arrivalId'] ?? '',
+        'aircraft'      => $flightPlan['aircraft']['icaoCode'] ?? '',
+        'state'         => $lastTrack['state'] ?? '',
+        'on_ground'     => $lastTrack['onGround'] ?? false,
+        'groundspeed'   => $lastTrack['groundSpeed'] ?? 0
+    ];
+
+    // --- C. Check Active Tour (in TRACKER DB) ---
+    // Uses the standard $pdo connection
+    $stmt = $pdo->prepare("
+        SELECT p.id as progress_id, p.current_leg_id, t.rules_json, 
+               l.dep_icao as leg_dep, l.arr_icao as leg_arr, l.id as leg_real_id
+        FROM pilot_tour_progress p
+        JOIN tours t ON p.tour_id = t.id
+        JOIN tour_legs l ON p.current_leg_id = l.id
+        WHERE p.pilot_id = ? 
+        AND p.status = 'In Progress'
+    ");
+    $stmt->execute([$pilotId]);
+    $activeLeg = $stmt->fetch();
+
+    if ($activeLeg) {
+        validateLeg($activeLeg, $pilotData, $pdo, $pilotId);
+    }
+}
+
+// Logic Function
+function validateLeg($legData, $pilotData, $pdo, $pilotId) {
+    // 1. Route Check
+    if ($pilotData['dep_icao'] != $legData['leg_dep'] || $pilotData['arr_icao'] != $legData['leg_arr']) return;
+
+    // 2. Aircraft Check
+    $rules = json_decode($legData['rules_json'], true);
+    if (isset($rules['allowed_aircraft']) && !empty($rules['allowed_aircraft'])) {
+        $allowedRaw = is_array($rules['allowed_aircraft']) ? $rules['allowed_aircraft'] : explode(',', $rules['allowed_aircraft']);
+        $allowed = array_map('trim', $allowedRaw);
+        if (!in_array($pilotData['aircraft'], $allowed)) {
+            echo "    -> Invalid Aircraft ({$pilotData['aircraft']}).\n";
+            return;
+        }
+    }
+
+    // 3. Landing Check
+    $isLanded = ($pilotData['state'] == 'Landed' || $pilotData['state'] == 'On Blocks' || ($pilotData['on_ground'] && $pilotData['groundspeed'] < 30));
+    
+    if ($isLanded) {
+        echo "    -> LEG COMPLETED! {$pilotData['callsign']} landed at destination.\n";
+        
+        // Save Log
+        $stmtLog = $pdo->prepare("
+            INSERT INTO pilot_leg_history (pilot_id, tour_id, leg_id, callsign, aircraft, date_flown, network)
+            VALUES (?, (SELECT tour_id FROM pilot_tour_progress WHERE id = ?), ?, ?, ?, NOW(), 'IVAO')
+        ");
+        $stmtLog->execute([$pilotId, $legData['progress_id'], $legData['leg_real_id'], $pilotData['callsign'], $pilotData['aircraft']]);
+
+        // Advance Leg
+        $currentLegId = $legData['leg_real_id'];
+        $stmtNext = $pdo->prepare("
+            SELECT id FROM tour_legs 
+            WHERE tour_id = (SELECT tour_id FROM pilot_tour_progress WHERE id = ?)
+            AND leg_order > (SELECT leg_order FROM tour_legs WHERE id = ?)
+            ORDER BY leg_order ASC LIMIT 1
+        ");
+        $stmtNext->execute([$legData['progress_id'], $currentLegId]);
+        $nextLeg = $stmtNext->fetch();
+
+        if ($nextLeg) {
+            $stmtUpd = $pdo->prepare("UPDATE pilot_tour_progress SET current_leg_id = ?, status = 'In Progress' WHERE id = ?");
+            $stmtUpd->execute([$nextLeg['id'], $legData['progress_id']]);
+        } else {
+            $stmtUpd = $pdo->prepare("UPDATE pilot_tour_progress SET status = 'Completed', completed_at = NOW() WHERE id = ?");
+            $stmtUpd->execute([$legData['progress_id']]);
+        }
+    }
+}
+?>
