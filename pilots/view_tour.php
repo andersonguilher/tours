@@ -1,16 +1,44 @@
 <?php
 // pilots/view_tour.php
-// CENTRAL DE OPERAÇÕES DE TOUR: Mapa + Despacho + SimBrief + METAR
+// CENTRAL DE OPERAÇÕES DE TOUR: Mapa + Despacho + SimBrief + METAR + CORREÇÃO DE ERRO CRÍTICO
 
-// 1. WORDPRESS & LOGIN
-$wpLoadPath = __DIR__ . '/../../../wp-load.php';
-if (file_exists($wpLoadPath)) { require_once $wpLoadPath; } else { die("Erro: WP não encontrado."); }
+// --- 1. CARREGAMENTO ROBUSTO DO WORDPRESS ---
+// Tenta encontrar o wp-load.php em vários locais possíveis para evitar erro de caminho
+$possiblePaths = [
+    __DIR__ . '/../../../wp-load.php',
+    __DIR__ . '/../../../../wp-load.php',
+    $_SERVER['DOCUMENT_ROOT'] . '/wp-load.php'
+];
+
+$wpLoaded = false;
+foreach ($possiblePaths as $path) {
+    if (file_exists($path)) {
+        require_once $path;
+        $wpLoaded = true;
+        break;
+    }
+}
+
+if (!$wpLoaded) {
+    // Fallback simples se não achar
+    die("Erro Crítico: Não foi possível carregar o WordPress. Verifique o caminho em view_tour.php");
+}
+
+// Ativa exibição de erros APENAS para administradores (para debug)
+if (current_user_can('administrator')) {
+    ini_set('display_errors', 1);
+    ini_set('display_startup_errors', 1);
+    error_reporting(E_ALL);
+} else {
+    ini_set('display_errors', 0);
+}
+
 if (!is_user_logged_in()) { die('Acesso restrito.'); }
 
 $current_user = wp_get_current_user();
 $wp_user_id = $current_user->ID;
 
-// 2. CONFIGURAÇÕES
+// --- 2. CONFIGURAÇÕES E BANCO ---
 $settingsFile = __DIR__ . '/../../settings.json'; 
 $tb_pilotos = 'Dados_dos_Pilotos'; 
 $col_matricula = 'matricula';
@@ -24,16 +52,32 @@ if (file_exists($settingsFile)) {
     if (isset($cols['id_piloto'])) $col_id_piloto = $cols['id_piloto'];
 }
 
-require '../config/db.php'; 
+// Carrega conexão do banco (Verifica se existe antes para evitar outro erro fatal)
+$dbPath = __DIR__ . '/../config/db.php';
+if (file_exists($dbPath)) {
+    require $dbPath; 
+    
+    // --- CORREÇÃO DE SEGURANÇA ---
+    // Força o PDO a lançar exceções em caso de erro.
+    // Isso é crucial para que o try/catch funcione se a tabela airports_2 não existir.
+    if (isset($pdo) && $pdo instanceof PDO) {
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    }
+} else {
+    die("Erro: Arquivo de configuração de banco de dados não encontrado em $dbPath");
+}
 
-// 3. IDENTIFICAÇÃO DO PILOTO (Para SimBrief)
+// --- 3. IDENTIFICAÇÃO DO PILOTO (Para SimBrief) ---
 $raw_callsign = "";
 try {
+    // Tenta conectar no banco de pilotos (separado ou mesmo)
+    // Usa as constantes do config/db.php se disponíveis, senão define padrão
     $host_p = defined('DB_SERVERNAME') ? DB_SERVERNAME : 'localhost';
     $user_p = defined('DB_PILOTOS_USER') ? DB_PILOTOS_USER : 'root';
     $pass_p = defined('DB_PILOTOS_PASS') ? DB_PILOTOS_PASS : '';
     $name_p = defined('DB_PILOTOS_NAME') ? DB_PILOTOS_NAME : 'u378005298_hEatD';
 
+    // Apenas tenta conectar se não for o mesmo banco do PDO principal, ou cria nova conexão
     $pdoPilots = new PDO("mysql:host=$host_p;dbname=$name_p;charset=utf8mb4", $user_p, $pass_p);
     $pdoPilots->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
@@ -42,6 +86,7 @@ try {
     $res = $stmt->fetch(PDO::FETCH_ASSOC);
     $raw_callsign = ($res) ? strtoupper($res[$col_matricula]) : strtoupper($current_user->user_login);
 } catch (Exception $e) {
+    // Se falhar a conexão com banco de pilotos, usa o login do WP como fallback
     $raw_callsign = strtoupper($current_user->user_login);
 }
 
@@ -52,7 +97,7 @@ if (strlen($simbrief_airline) < 3) $simbrief_airline = 'KFY'; // Fallback
 if (empty($simbrief_number)) $simbrief_number = '0001';
 $display_callsign = $simbrief_airline . $simbrief_number;
 
-// 4. DADOS DO TOUR
+// --- 4. DADOS DO TOUR ---
 $tour_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 if (!$tour_id) die("ID Inválido");
 
@@ -69,12 +114,21 @@ function formatarData($date) {
 
 function getMetar($icao) {
     // API Simples da VATSIM (Pública e gratuita)
-    $url = "https://metar.vatsim.net/metar.php?id=" . $icao;
-    $metar = @file_get_contents($url);
+    // Usa curl se file_get_contents estiver bloqueado
+    if (function_exists('curl_init')) {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, "https://metar.vatsim.net/metar.php?id=" . $icao);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 2);
+        $metar = curl_exec($ch);
+        curl_close($ch);
+    } else {
+        $metar = @file_get_contents("https://metar.vatsim.net/metar.php?id=" . $icao);
+    }
     return $metar ? trim($metar) : "Dados meteorológicos indisponíveis.";
 }
 
-// 5. AÇÃO: INICIAR TOUR
+// --- 5. AÇÃO: INICIAR TOUR ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['start_tour'])) {
     $check = $pdo->prepare("SELECT id FROM tour_progress WHERE pilot_id = ? AND tour_id = ?");
     $check->execute([$wp_user_id, $tour_id]);
@@ -87,13 +141,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['start_tour'])) {
         if ($first) {
             $pdo->prepare("INSERT INTO tour_progress (pilot_id, tour_id, current_leg_id, status) VALUES (?, ?, ?, 'In Progress')")
                 ->execute([$wp_user_id, $tour_id, $first['id']]);
-            header("Location: view_tour.php?id=" . $tour_id);
+            // Refresh na página
+            echo "<script>window.location.href='view_tour.php?id=$tour_id';</script>";
             exit;
         }
     }
 }
 
-// 6. STATUS E PERNAS
+// --- 6. STATUS E PERNAS ---
 $stmtProg = $pdo->prepare("SELECT * FROM tour_progress WHERE pilot_id = ? AND tour_id = ?");
 $stmtProg->execute([$wp_user_id, $tour_id]);
 $progress = $stmtProg->fetch();
@@ -101,17 +156,46 @@ $progress = $stmtProg->fetch();
 $currentLegId = $progress ? $progress['current_leg_id'] : 0;
 $tourStatus = $progress ? $progress['status'] : 'Not Started';
 
-// Busca todas as pernas com dados de aeroportos (JOIN)
-$sqlLegs = "SELECT l.*, 
-            dep.name as dep_name, dep.latitude_deg as dep_lat, dep.longitude_deg as dep_lon, dep.municipality as dep_city, dep.flag_url as dep_flag, 
-            arr.name as arr_name, arr.latitude_deg as arr_lat, arr.longitude_deg as arr_lon, arr.municipality as arr_city, arr.flag_url as arr_flag 
-            FROM tour_legs l 
-            LEFT JOIN airports_2 dep ON l.dep_icao = dep.ident 
-            LEFT JOIN airports_2 arr ON l.arr_icao = arr.ident 
-            WHERE l.tour_id = ? ORDER BY l.leg_order ASC";
-$stmtLegs = $pdo->prepare($sqlLegs);
-$stmtLegs->execute([$tour_id]);
-$allLegs = $stmtLegs->fetchAll();
+// --- CORREÇÃO DO ERRO CRÍTICO AQUI ---
+// Tentamos buscar com os dados do aeroporto (tabela airports_2).
+// Se a tabela não existir, capturamos o erro e buscamos sem ela.
+
+$allLegs = [];
+try {
+    // Tenta query completa com JOIN
+    $sqlLegs = "SELECT l.*, 
+                dep.name as dep_name, dep.latitude_deg as dep_lat, dep.longitude_deg as dep_lon, dep.municipality as dep_city, dep.flag_url as dep_flag, 
+                arr.name as arr_name, arr.latitude_deg as arr_lat, arr.longitude_deg as arr_lon, arr.municipality as arr_city, arr.flag_url as arr_flag 
+                FROM tour_legs l 
+                LEFT JOIN airports_2 dep ON l.dep_icao = dep.ident 
+                LEFT JOIN airports_2 arr ON l.arr_icao = arr.ident 
+                WHERE l.tour_id = ? ORDER BY l.leg_order ASC";
+    
+    $stmtLegs = $pdo->prepare($sqlLegs);
+    
+    // VERIFICAÇÃO EXTRA: Se prepare retornar false (erro), lançamos exceção manualmente
+    if (!$stmtLegs) {
+        throw new PDOException("Falha ao preparar query (Tabela airports_2 inexistente?)");
+    }
+
+    $stmtLegs->execute([$tour_id]);
+    $allLegs = $stmtLegs->fetchAll();
+} catch (PDOException $e) {
+    // SE DER ERRO (Tabela airports_2 não existe), roda query simples (FALLBACK)
+    $sqlLegsFallback = "SELECT l.*, 
+                        l.dep_icao as dep_name, '' as dep_lat, '' as dep_lon, '' as dep_city, '' as dep_flag,
+                        l.arr_icao as arr_name, '' as arr_lat, '' as arr_lon, '' as arr_city, '' as arr_flag
+                        FROM tour_legs l
+                        WHERE l.tour_id = ? ORDER BY l.leg_order ASC";
+    $stmtLegs = $pdo->prepare($sqlLegsFallback);
+    $stmtLegs->execute([$tour_id]);
+    $allLegs = $stmtLegs->fetchAll();
+    
+    // Opcional: Avisar admin no topo
+    if (current_user_can('administrator')) {
+        echo "<div style='background:red;color:white;text-align:center;padding:5px;'>Aviso Admin: Tabela 'airports_2' não encontrada. Modo simplificado ativo.</div>";
+    }
+}
 
 // Descobre a ordem atual para colorir o mapa
 $currentLegOrder = 0;
@@ -129,9 +213,13 @@ if ($progress) {
 }
 
 // GERA JSON PARA O MAPA (Leaflet)
+// Só adiciona ao mapa se tiver coordenadas (modo fallback não tem)
 $mapSegments = [];
+$hasCoordinates = false;
+
 foreach($allLegs as $leg) {
-    if ($leg['dep_lat'] && $leg['dep_lon'] && $leg['arr_lat'] && $leg['arr_lon']) {
+    if (!empty($leg['dep_lat']) && !empty($leg['dep_lon']) && !empty($leg['arr_lat']) && !empty($leg['arr_lon'])) {
+        $hasCoordinates = true;
         $status = 'locked'; 
         if ($progress) {
             if ($leg['id'] == $currentLegId && $tourStatus != 'Completed') {
