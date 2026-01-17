@@ -1,6 +1,6 @@
 <?php
 // view_tour.php
-// VERSÃO FINAL: Mapa com Status Visual (Verde/Amarelo/Cinza)
+// VERSÃO FINAL: Mapa com Status Visual + Datas + Correção de Texto
 
 // 1. WORDPRESS & LOGIN
 $wpLoadPath = __DIR__ . '/../../../wp-load.php';
@@ -60,6 +60,12 @@ $stmt->execute([$tour_id]);
 $tour = $stmt->fetch();
 if (!$tour) die("Tour não encontrado.");
 
+// Helpers de Data
+function formatarData($date) {
+    if (!$date) return "Indefinido";
+    return date("d/m/Y", strtotime($date));
+}
+
 // 5. AÇÃO: INICIAR TOUR
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['start_tour'])) {
     $check = $pdo->prepare("SELECT id FROM pilot_tour_progress WHERE pilot_id = ? AND tour_id = ?");
@@ -93,11 +99,11 @@ $stmtLegs = $pdo->prepare($sqlLegs);
 $stmtLegs->execute([$tour_id]);
 $allLegs = $stmtLegs->fetchAll();
 
-// Descobre a ORDEM da perna atual para comparar (Leg 1 < Leg 2)
+// Descobre a ORDEM da perna atual
 $currentLegOrder = 0;
 if ($progress) {
     if ($tourStatus == 'Completed') {
-        $currentLegOrder = 9999; // Tudo feito
+        $currentLegOrder = 9999;
     } else {
         foreach ($allLegs as $l) {
             if ($l['id'] == $currentLegId) {
@@ -112,18 +118,14 @@ if ($progress) {
 $mapSegments = [];
 foreach($allLegs as $leg) {
     if ($leg['dep_lat'] && $leg['dep_lon'] && $leg['arr_lat'] && $leg['arr_lon']) {
-        
-        // Define Status Visual da Perna no Mapa
-        $status = 'locked'; // Padrão
-        
+        $status = 'locked'; 
         if ($progress) {
             if ($leg['id'] == $currentLegId && $tourStatus != 'Completed') {
-                $status = 'active'; // Amarelo
+                $status = 'active'; 
             } elseif ($leg['leg_order'] < $currentLegOrder || $tourStatus == 'Completed') {
-                $status = 'completed'; // Verde
+                $status = 'completed'; 
             }
         }
-
         $mapSegments[] = [
             'start' => ['lat' => $leg['dep_lat'], 'lon' => $leg['dep_lon'], 'code' => $leg['dep_icao'], 'city' => $leg['dep_city'], 'name' => $leg['dep_name'], 'flag' => $leg['dep_flag']],
             'end'   => ['lat' => $leg['arr_lat'], 'lon' => $leg['arr_lon'], 'code' => $leg['arr_icao'], 'city' => $leg['arr_city'], 'name' => $leg['arr_name'], 'flag' => $leg['arr_flag']],
@@ -157,7 +159,6 @@ $rules = json_decode($tour['rules_json'], true);
         .glass-card { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
         .btn-glow { animation: glow 2s infinite; }
         @keyframes glow { 0% { box-shadow: 0 0 5px #22c55e; } 50% { box-shadow: 0 0 20px #22c55e; } 100% { box-shadow: 0 0 5px #22c55e; } }
-        /* Tooltip do Mapa */
         .custom-tooltip {
             background-color: rgba(15, 23, 42, 0.95) !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -199,6 +200,18 @@ $rules = json_decode($tour['rules_json'], true);
             </div>
 
             <div class="flex-grow overflow-y-auto p-6 custom-scrollbar flex flex-col">
+                
+                <?php if ($tour['start_date'] || $tour['end_date']): ?>
+                <div class="mb-4 flex gap-4 text-xs bg-slate-800/50 p-3 rounded border border-slate-700/50">
+                    <?php if($tour['start_date']): ?>
+                    <div><span class="text-slate-500 uppercase font-bold text-[10px] block">Início</span> <?php echo formatarData($tour['start_date']); ?></div>
+                    <?php endif; ?>
+                    <?php if($tour['end_date']): ?>
+                    <div><span class="text-slate-500 uppercase font-bold text-[10px] block">Término</span> <?php echo formatarData($tour['end_date']); ?></div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+
                 <?php if ($progress): ?>
                 <div class="mb-6 bg-slate-800/50 p-4 rounded-xl border border-slate-700">
                     <div class="flex justify-between text-xs text-slate-400 uppercase font-bold mb-2">
@@ -230,7 +243,7 @@ $rules = json_decode($tour['rules_json'], true);
                         <span class="font-mono text-white text-sm font-bold"><?php echo $rules['allowed_aircraft'] ?? 'Livre'; ?></span>
                     </div>
                     <div class="flex justify-between items-center bg-slate-800 p-3 rounded border border-slate-700">
-                        <span class="text-slate-400 text-xs">Velocidade < FL100</span>
+                        <span class="text-slate-400 text-xs">Velocidade Máx. (< FL100)</span>
                         <span class="font-mono text-red-400 font-bold"><?php echo $rules['speed_fl100'] ?? '250'; ?> kts</span>
                     </div>
                 </div>
@@ -356,27 +369,25 @@ $rules = json_decode($tour['rules_json'], true);
             segments.forEach(seg => {
                 var curvePoints = getGreatCirclePoints(seg.start, seg.end);
                 
-                // --- LÓGICA DE CORES DO MAPA ---
-                let color = '#475569'; // Cinza (Padrão/Bloqueado)
+                let color = '#475569'; 
                 let weight = 2;
                 let opacity = 0.4;
-                let dash = '5, 5'; // Tracejado
+                let dash = '5, 5'; 
 
                 if (seg.status === 'active') {
-                    color = '#fbbf24'; // Amarelo (Ativo)
+                    color = '#fbbf24'; 
                     weight = 3;
                     opacity = 1;
                     dash = '8, 8';
                 } else if (seg.status === 'completed') {
-                    color = '#10b981'; // Verde (Concluído)
+                    color = '#10b981'; 
                     weight = 3;
                     opacity = 1;
-                    dash = null; // Linha Sólida
+                    dash = null; 
                 }
 
                 L.polyline(curvePoints, {color: color, weight: weight, opacity: opacity, dashArray: dash}).addTo(map);
                 
-                // Tooltip Rico
                 const createTooltip = (point) => {
                     let html = "<div class='tooltip-content'>";
                     if(point.flag) html += `<img src='${point.flag}' class='w-6 h-4 mb-1 mx-auto rounded shadow-sm block'>`;

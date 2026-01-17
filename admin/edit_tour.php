@@ -106,7 +106,7 @@ $rules = json_decode($tour['rules_json'], true);
                         <input type="text" name="rules[allowed_aircraft]" value="<?php echo $rules['allowed_aircraft'] ?? ''; ?>" class="input-admin border-yellow-300">
                     </div>
                     <div>
-                        <label class="label-admin text-yellow-800">Vel Máx</label>
+                        <label class="label-admin text-yellow-800">Velocidade Máx. (< FL100)</label>
                         <input type="number" name="rules[speed_fl100]" value="<?php echo $rules['speed_fl100'] ?? '250'; ?>" class="input-admin border-yellow-300">
                     </div>
                     <div>

@@ -87,7 +87,7 @@ require '../config/db.php';
                         <input type="text" name="rules[allowed_aircraft]" class="input-admin border-blue-200" placeholder="B738, A320">
                     </div>
                     <div>
-                        <label class="label-admin text-blue-800">Vel Máx (< FL100)</label>
+                        <label class="label-admin text-blue-800">Velocidade Máx. (< FL100)</label>
                         <input type="number" name="rules[speed_fl100]" value="250" class="input-admin border-blue-200">
                     </div>
                     <div>
