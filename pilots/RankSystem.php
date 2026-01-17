@@ -1,53 +1,76 @@
 <?php
 // includes/RankSystem.php
-
 class RankSystem {
     
-    // Definição das Patentes (Min Horas => Dados)
-    // Você pode substituir as URLs das imagens por caminhos locais para as "epaulets"
-    private static $ranks = [
-        0 =>   ['title' => 'Aluno Piloto',    'stripes' => 1, 'img' => 'rank_1.png'],
-        10 =>  ['title' => 'Oficial Piloto',  'stripes' => 2, 'img' => 'rank_2.png'],
-        50 =>  ['title' => 'Comandante',      'stripes' => 3, 'img' => 'rank_3.png'],
-        100 => ['title' => 'Comandante Sênior', 'stripes' => 4, 'img' => 'rank_4.png'],
-        500 => ['title' => 'Instrutor Master',  'stripes' => 4, 'img' => 'rank_gold.png'] // Estrela dourada?
-    ];
-
     public static function getRank($flightMinutes) {
-        $hours = floor($flightMinutes / 60);
-        $currentRank = self::$ranks[0]; // Padrão
+        global $pdo; 
+        // Garante conexão se não houver
+        if (!isset($pdo)) { 
+            $dbPath = __DIR__ . '/../config/db.php';
+            if(file_exists($dbPath)) require $dbPath; 
+        }
 
-        foreach (self::$ranks as $minHours => $rankData) {
-            if ($hours >= $minHours) {
-                $currentRank = $rankData;
-            } else {
-                break; // Se as horas do piloto são menores que o requisito, para no anterior
+        $hours = floor($flightMinutes / 60);
+        
+        // Padrão (Fallback)
+        $rank = [
+            'title' => 'Aluno Piloto',
+            'img' => 'rank_1.png', // Mantido para compatibilidade, mas não usado no CSS
+            'stripes' => 1,
+            'has_star' => 0,
+            'total_hours' => $hours
+        ];
+
+        if (isset($pdo)) {
+            try {
+                // Busca a maior patente possível
+                $stmt = $pdo->prepare("SELECT * FROM tour_ranks WHERE min_hours <= ? ORDER BY min_hours DESC LIMIT 1");
+                $stmt->execute([$hours]);
+                $result = $stmt->fetch(PDO::FETCH_ASSOC);
+                
+                if ($result) {
+                    $rank['title'] = $result['rank_title'];
+                    $rank['stripes'] = $result['stripes'];
+                    $rank['has_star'] = $result['has_star'] ?? 0;
+                }
+            } catch (Exception $e) {
+                // Falha silenciosa, usa o padrão
             }
         }
-        
-        // Adiciona as horas formatadas ao array de retorno
-        $currentRank['total_hours'] = $hours;
-        return $currentRank;
+
+        return $rank;
     }
 
-    // Exemplo de uso para barra de progresso para próxima patente
     public static function getNextRankProgress($flightMinutes) {
+        global $pdo;
+        if (!isset($pdo)) return 0;
+
         $hours = floor($flightMinutes / 60);
-        $nextGoal = 100000; // Infinito se for o último
         
-        foreach (array_keys(self::$ranks) as $minHours) {
-            if ($minHours > $hours) {
-                $nextGoal = $minHours;
-                break;
-            }
+        try {
+            // Próximo Rank
+            $stmt = $pdo->prepare("SELECT min_hours FROM tour_ranks WHERE min_hours > ? ORDER BY min_hours ASC LIMIT 1");
+            $stmt->execute([$hours]);
+            $nextRankHours = $stmt->fetchColumn();
+            
+            if (!$nextRankHours) return 100; // Nível máximo
+            
+            // Rank Atual (Base)
+            $stmtCurr = $pdo->prepare("SELECT min_hours FROM tour_ranks WHERE min_hours <= ? ORDER BY min_hours DESC LIMIT 1");
+            $stmtCurr->execute([$hours]);
+            $currentBase = $stmtCurr->fetchColumn() ?: 0;
+            
+            $totalNeeded = $nextRankHours - $currentBase;
+            $earned = $hours - $currentBase;
+            
+            if ($totalNeeded <= 0) return 100;
+            
+            $pct = round(($earned / $totalNeeded) * 100);
+            return ($pct > 100) ? 100 : $pct;
+
+        } catch (Exception $e) {
+            return 0;
         }
-        
-        if ($nextGoal == 100000) return 100; // Já no topo
-        
-        // Cálculo simples de porcentagem
-        // Ex: Tem 30h, Próximo 50h. Progresso = 30/50 * 100 = 60%
-        // Pode refinar para ser progresso *dentro* do nível
-        return round(($hours / $nextGoal) * 100);
     }
 }
 ?>

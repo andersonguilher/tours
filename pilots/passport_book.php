@@ -1,12 +1,12 @@
 <?php
 // pilots/passport_book.php
-// VERSÃO 7.0: SOMBRAS REFORÇADAS + CAPA FINAL FECHADA
+// VERSÃO 7.1: INTEGRADO COM NAVBAR
 define('BASE_PATH', dirname(__DIR__));
 require '../config/db.php';
+require_once('../../../wp-load.php'); // Carrega WP para pegar usuário na navbar
 
 // --- 1. IDENTIFICAÇÃO DO PILOTO ---
 $pilot_id = $_GET['pilot_id'] ?? 0;
-
 if ($pilot_id == 0 && function_exists('wp_get_current_user')) {
     $current_user = wp_get_current_user();
     $pilot_id = $current_user->ID;
@@ -30,8 +30,7 @@ $pilot = [
     'nome' => 'PILOTO', 'sobrenome' => 'DESCONHECIDO',
     'foto' => '', 'matricula' => '0000', 'nacionalidade' => 'BRA',
     'ivao' => '---', 'vatsim' => '---',
-    'admissao' => date('d/m/Y'), 'nascimento' => '01/01/1980',
-    'nascimento_mrz' => '800101'
+    'admissao' => date('d/m/Y'), 'nascimento' => '01/01/1980', 'nascimento_mrz' => '800101'
 ];
 
 // --- 4. BUSCA DADOS REAIS ---
@@ -92,8 +91,12 @@ if (empty($history_chunks)) $history_chunks = [[]];
     <meta charset="UTF-8">
     <title>Passaporte - <?php echo htmlspecialchars($pilot['nome']); ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;700;900&family=OCR-B&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
     <style>
         :root {
             --bg-color: #0f172a;
@@ -111,10 +114,20 @@ if (empty($history_chunks)) $history_chunks = [[]];
             background-size: 30px 30px;
             font-family: 'Montserrat', sans-serif;
             color: white;
-            height: 100vh;
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-            overflow: hidden;
+            /* Alterado para permitir rolagem se necessário e posicionamento normal */
+            min-height: 100vh;
+            display: block; 
+            overflow-x: hidden;
+        }
+
+        /* Container que centraliza o passaporte abaixo da navbar */
+        .stage-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            /* Altura total menos a altura da navbar (64px) */
+            min-height: calc(100vh - 64px);
+            padding: 20px;
         }
 
         .stage {
@@ -124,6 +137,7 @@ if (empty($history_chunks)) $history_chunks = [[]];
             display: flex; justify-content: center; align-items: center;
         }
 
+        /* LIVRO */
         .passport-book {
             display: flex;
             background: var(--passport-bg);
@@ -136,10 +150,9 @@ if (empty($history_chunks)) $history_chunks = [[]];
             transition: width 0.6s cubic-bezier(0.25, 1, 0.5, 1), border-radius 0.6s ease;
         }
 
-        /* ESTADO FECHADO (Capa Frente ou Verso) */
         .passport-book.book-closed {
             width: 450px; 
-            border-radius: 12px 12px 12px 12px; 
+            border-radius: 12px; 
             box-shadow: 0 20px 40px rgba(0,0,0,0.4);
         }
 
@@ -154,8 +167,7 @@ if (empty($history_chunks)) $history_chunks = [[]];
         .page.active { display: flex; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-        /* --- CORREÇÃO DAS SOMBRAS (LOMBADA) --- */
-        /* Usando linear-gradient para uma sombra mais perceptível no centro */
+        /* Sombras */
         .spine-shadow-left {
             background: linear-gradient(to right, #ffffff 90%, #e2e8f0 100%);
             box-shadow: inset -20px 0 30px -10px rgba(0,0,0,0.15); 
@@ -168,12 +180,8 @@ if (empty($history_chunks)) $history_chunks = [[]];
             z-index: 2;
         }
 
-        .page-cover {
-            background: var(--passport-cover);
-            color: var(--gold);
-            text-align: center; justify-content: center; align-items: center;
-            width: 100%; height: 100%;
-        }
+        /* Estilos Internos */
+        .page-cover { background: var(--passport-cover); color: var(--gold); text-align: center; justify-content: center; align-items: center; width: 100%; height: 100%; }
         .cover-icon { font-size: 5rem; margin-bottom: 2rem; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3)); }
         .cover-title { font-weight: 900; font-size: 2.5rem; letter-spacing: 4px; line-height: 1; margin: 0; }
         .cover-subtitle { font-weight: 300; font-size: 1rem; letter-spacing: 2px; opacity: 0.8; margin-top: 10px; }
@@ -199,7 +207,7 @@ if (empty($history_chunks)) $history_chunks = [[]];
 
         .page-num { position: absolute; bottom: 15px; width: 100%; text-align: center; font-size: 0.7rem; color: var(--text-light); }
 
-        .controls { position: absolute; width: 110%; top: 50%; transform: translateY(-50%); display: flex; justify-content: space-between; padding: 0 20px; pointer-events: none; }
+        .controls { position: absolute; width: 110%; top: 50%; transform: translateY(-50%); display: flex; justify-content: space-between; padding: 0 20px; pointer-events: none; z-index: 50; }
         .btn-nav { pointer-events: auto; background: rgba(255,255,255,0.1); backdrop-filter: blur(5px); border: 1px solid rgba(255,255,255,0.2); color: white; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.3s; font-size: 1.5rem; }
         .btn-nav:hover { background: var(--gold); color: #000; transform: scale(1.1); box-shadow: 0 0 20px rgba(251, 191, 36, 0.5); }
         .btn-nav.disabled { opacity: 0; pointer-events: none; }
@@ -213,92 +221,96 @@ if (empty($history_chunks)) $history_chunks = [[]];
 </head>
 <body>
 
-<div class="stage">
-    
-    <div class="passport-book" id="bookContainer">
+<?php include '../includes/navbar.php'; ?>
+
+<div class="stage-container">
+    <div class="stage">
         
-        <div class="page page-cover active" id="p1">
-            <i class="fa-solid fa-earth-americas cover-icon"></i>
-            <h1 class="cover-title">PASSPORT</h1>
-            <h2 class="cover-subtitle">KAFLY VIRTUAL AIRLINE</h2>
-            <div style="margin-top: 50px; border: 2px solid var(--gold); padding: 5px 15px; border-radius: 20px; font-size: 0.8rem; font-weight: bold;">OFFICIAL DOCUMENT</div>
-        </div>
+        <div class="passport-book" id="bookContainer">
+            
+            <div class="page page-cover active" id="p1">
+                <i class="fa-solid fa-earth-americas cover-icon"></i>
+                <h1 class="cover-title">PASSPORT</h1>
+                <h2 class="cover-subtitle">KAFLY VIRTUAL AIRLINE</h2>
+                <div style="margin-top: 50px; border: 2px solid var(--gold); padding: 5px 15px; border-radius: 20px; font-size: 0.8rem; font-weight: bold;">OFFICIAL DOCUMENT</div>
+            </div>
 
-        <div class="page spine-shadow-left" id="p2">
-            <div style="display: flex; align-items: center; justify-content: center; height: 100%; padding: 40px; text-align: center; color: var(--text-light);">
-                <div>
-                    <p style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; line-height: 1.8;">
-                        Este documento certifica a qualificação<br>e o histórico operacional do piloto.
-                    </p>
-                    <div style="width: 40px; height: 2px; background: #cbd5e1; margin: 30px auto;"></div>
-                    <p style="font-size: 0.7rem; font-weight: bold;">PROPERTY OF KAFLY SYSTEMS</p>
+            <div class="page spine-shadow-left" id="p2">
+                <div style="display: flex; align-items: center; justify-content: center; height: 100%; padding: 40px; text-align: center; color: var(--text-light);">
+                    <div>
+                        <p style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; line-height: 1.8;">
+                            Este documento certifica a qualificação<br>e o histórico operacional do piloto.
+                        </p>
+                        <div style="width: 40px; height: 2px; background: #cbd5e1; margin: 30px auto;"></div>
+                        <p style="font-size: 0.7rem; font-weight: bold;">PROPERTY OF KAFLY SYSTEMS</p>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div class="page spine-shadow-right" id="p3">
-            <div class="id-grid">
-                <div class="id-header">
-                    <span class="id-label-main">Identification</span>
-                    <span class="id-label-main" style="color: var(--text-light)">BRA / INT</span>
+            <div class="page spine-shadow-right" id="p3">
+                <div class="id-grid">
+                    <div class="id-header">
+                        <span class="id-label-main">Identification</span>
+                        <span class="id-label-main" style="color: var(--text-light)">BRA / INT</span>
+                    </div>
+                    <img src="<?php echo htmlspecialchars($pilot['foto']); ?>" class="pilot-img" onerror="this.src='https://ui-avatars.com/api/?name=Pilot&background=ddd&size=150'">
+                    <div class="data-fields">
+                        <div class="field" style="grid-column: span 2;"><span class="label">Surname</span><span class="val-lg"><?php echo htmlspecialchars($pilot['sobrenome']); ?></span></div>
+                        <div class="field" style="grid-column: span 2;"><span class="label">Given Names</span><span class="value"><?php echo htmlspecialchars($pilot['nome']); ?></span></div>
+                        <div class="field"><span class="label">Nationality</span><span class="value"><?php echo htmlspecialchars($pilot['nacionalidade']); ?></span></div>
+                        <div class="field"><span class="label">Date of Birth</span><span class="value"><?php echo htmlspecialchars($pilot['nascimento']); ?></span></div>
+                        <div class="field"><span class="label">Callsign</span><span class="value"><?php echo htmlspecialchars($pilot['matricula']); ?></span></div>
+                        <div class="field"><span class="label">Issued</span><span class="value"><?php echo htmlspecialchars($pilot['admissao']); ?></span></div>
+                    </div>
+                    <div class="mrz"><?php echo $mrz1; ?><br><?php echo $mrz2; ?></div>
                 </div>
-                <img src="<?php echo htmlspecialchars($pilot['foto']); ?>" class="pilot-img" onerror="this.src='https://ui-avatars.com/api/?name=Pilot&background=ddd&size=150'">
-                <div class="data-fields">
-                    <div class="field" style="grid-column: span 2;"><span class="label">Surname</span><span class="val-lg"><?php echo htmlspecialchars($pilot['sobrenome']); ?></span></div>
-                    <div class="field" style="grid-column: span 2;"><span class="label">Given Names</span><span class="value"><?php echo htmlspecialchars($pilot['nome']); ?></span></div>
-                    <div class="field"><span class="label">Nationality</span><span class="value"><?php echo htmlspecialchars($pilot['nacionalidade']); ?></span></div>
-                    <div class="field"><span class="label">Date of Birth</span><span class="value"><?php echo htmlspecialchars($pilot['nascimento']); ?></span></div>
-                    <div class="field"><span class="label">Callsign</span><span class="value"><?php echo htmlspecialchars($pilot['matricula']); ?></span></div>
-                    <div class="field"><span class="label">Issued</span><span class="value"><?php echo htmlspecialchars($pilot['admissao']); ?></span></div>
-                </div>
-                <div class="mrz"><?php echo $mrz1; ?><br><?php echo $mrz2; ?></div>
+                <div class="page-num">01</div>
             </div>
-            <div class="page-num">01</div>
-        </div>
 
-        <?php 
-        $page_counter = 2;
-        foreach ($history_chunks as $chunk): 
-            $page_counter++;
-            $side_class = ($page_counter % 2 != 0) ? 'spine-shadow-right' : 'spine-shadow-left';
-        ?>
-            <div class="page <?php echo $side_class; ?>">
-                <div class="visa-header">Visas & Entry Permits</div>
-                <div class="visas-grid">
-                    <?php 
-                    for ($i = 0; $i < $stamps_per_page; $i++):
-                        if (isset($chunk[$i])):
-                            $h = $chunk[$i];
-                            $date = date("d.M.Y", strtotime($h['date_flown']));
-                            $colorClass = 'c-' . rand(1, 4);
-                    ?>
-                        <div class="stamp filled <?php echo $colorClass; ?>">
-                            <span style="font-size: 0.5rem; font-weight: bold; margin-bottom: 2px;">ENTRY</span>
-                            <span class="stamp-code"><?php echo $h['arr_icao']; ?></span>
-                            <span style="font-size: 0.55rem; font-weight: 600; margin-top: 5px; opacity: 0.7;"><?php echo $date; ?></span>
-                        </div>
-                    <?php else: ?>
-                        <div class="stamp"><span class="stamp-code" style="opacity: 0.1">VOID</span></div>
-                    <?php endif; endfor; ?>
+            <?php 
+            $page_counter = 2;
+            foreach ($history_chunks as $chunk): 
+                $page_counter++;
+                $side_class = ($page_counter % 2 != 0) ? 'spine-shadow-right' : 'spine-shadow-left';
+            ?>
+                <div class="page <?php echo $side_class; ?>">
+                    <div class="visa-header">Visas & Entry Permits</div>
+                    <div class="visas-grid">
+                        <?php 
+                        for ($i = 0; $i < $stamps_per_page; $i++):
+                            if (isset($chunk[$i])):
+                                $h = $chunk[$i];
+                                $date = date("d.M.Y", strtotime($h['date_flown']));
+                                $colorClass = 'c-' . rand(1, 4);
+                        ?>
+                            <div class="stamp filled <?php echo $colorClass; ?>">
+                                <span style="font-size: 0.5rem; font-weight: bold; margin-bottom: 2px;">ENTRY</span>
+                                <span class="stamp-code"><?php echo $h['arr_icao']; ?></span>
+                                <span style="font-size: 0.55rem; font-weight: 600; margin-top: 5px; opacity: 0.7;"><?php echo $date; ?></span>
+                            </div>
+                        <?php else: ?>
+                            <div class="stamp"><span class="stamp-code" style="opacity: 0.1">VOID</span></div>
+                        <?php endif; endfor; ?>
+                    </div>
+                    <div class="page-num"><?php echo str_pad($page_counter, 2, '0', STR_PAD_LEFT); ?></div>
                 </div>
-                <div class="page-num"><?php echo str_pad($page_counter, 2, '0', STR_PAD_LEFT); ?></div>
+            <?php endforeach; ?>
+
+            <?php if (($page_counter) % 2 != 0): ?>
+                <div class="page spine-shadow-right"></div>
+            <?php endif; ?>
+
+            <div class="page page-cover" id="endPage">
+                <i class="fa-solid fa-plane-up cover-icon" style="font-size: 3rem;"></i>
+                <h2 class="cover-subtitle" style="opacity: 1;">KAFLY SYSTEMS</h2>
             </div>
-        <?php endforeach; ?>
 
-        <?php if (($page_counter) % 2 != 0): ?>
-            <div class="page spine-shadow-right"></div>
-        <?php endif; ?>
-
-        <div class="page page-cover" id="endPage">
-            <i class="fa-solid fa-plane-up cover-icon" style="font-size: 3rem;"></i>
-            <h2 class="cover-subtitle" style="opacity: 1;">KAFLY SYSTEMS</h2>
         </div>
 
-    </div>
-
-    <div class="controls">
-        <div class="btn-nav" id="prevBtn" onclick="changePage(-1)"><i class="fa-solid fa-chevron-left"></i></div>
-        <div class="btn-nav" id="nextBtn" onclick="changePage(1)"><i class="fa-solid fa-chevron-right"></i></div>
+        <div class="controls">
+            <div class="btn-nav" id="prevBtn" onclick="changePage(-1)"><i class="fa-solid fa-chevron-left"></i></div>
+            <div class="btn-nav" id="nextBtn" onclick="changePage(1)"><i class="fa-solid fa-chevron-right"></i></div>
+        </div>
     </div>
 </div>
 
@@ -320,73 +332,52 @@ if (empty($history_chunks)) $history_chunks = [[]];
             pages[currentIndex].classList.add('active');
             bookContainer.classList.remove('book-closed'); 
         } else {
-            // DESKTOP LOGIC
             if (currentIndex === 0) {
-                // CAPA FRENTE FECHADA
+                // CAPA FRENTE
                 pages[0].classList.add('active');
                 bookContainer.classList.add('book-closed');
             } 
             else if (currentIndex === totalPages - 1) {
-                // CAPA VERSO FECHADA
+                // CAPA VERSO
                 pages[totalPages - 1].classList.add('active');
                 bookContainer.classList.add('book-closed');
             }
             else {
-                // LIVRO ABERTO
+                // ABERTO
                 bookContainer.classList.remove('book-closed');
                 if (pages[currentIndex]) pages[currentIndex].classList.add('active');
                 if (pages[currentIndex+1]) pages[currentIndex+1].classList.add('active');
             }
         }
 
-        // Botoes
         document.getElementById('prevBtn').classList.toggle('disabled', currentIndex === 0);
         document.getElementById('nextBtn').classList.toggle('disabled', currentIndex === totalPages - 1);
     }
 
     function changePage(dir) {
         let nextIndex = currentIndex;
-
         if (isMobile) {
             nextIndex += dir;
         } else {
             if (dir === 1) {
-                // AVANÇAR
-                if (currentIndex === 0) {
-                    nextIndex = 1; // Abrir
-                } else {
+                if (currentIndex === 0) nextIndex = 1;
+                else {
                     nextIndex += 2;
-                    // Se passar do limite, vai para a capa final
-                    if (nextIndex >= totalPages) nextIndex = totalPages - 1;
-                    // Se cair na capa final (que deve ser fechada), garante index exato
-                    if (nextIndex == totalPages - 1) nextIndex = totalPages - 1; 
+                    if (nextIndex >= totalPages - 1) nextIndex = totalPages - 1;
                 }
             } else {
-                // VOLTAR
-                if (currentIndex === totalPages - 1) {
-                    // Estava na capa final fechada, volta para a par anterior aberta
-                    // A capa final é sempre "direita" ou "sozinha". 
-                    // A anterior aberta seria (Total-1) - 2 se Total for par?
-                    // Vamos simplificar: A página anterior à capa final é a (Total-2).
-                    // Mas como mostramos pares (1,2), (3,4)...
-                    // Se Total=6 (0,1,2,3,4,5). CapaFinal=5.
-                    // Anterior aberta deve mostrar 3 e 4. O index deve ser 3.
-                    // 5 - 2 = 3.
-                    nextIndex -= 2;
-                    // Ajuste fino se necessário para garantir impar
-                    if (nextIndex % 2 == 0 && nextIndex != 0) nextIndex -= 1;
-                } else if (currentIndex === 1) {
-                    nextIndex = 0; // Fechar capa frente
-                } else {
-                    nextIndex -= 2;
+                if (currentIndex === totalPages - 1) nextIndex -= 2; // Simplesmente volta para o par anterior
+                else if (currentIndex === 1) nextIndex = 0;
+                else nextIndex -= 2;
+                
+                // Correção de paridade para garantir que ao voltar da capa final, caia no índice ímpar (lado esquerdo)
+                if (nextIndex > 0 && nextIndex < totalPages - 1 && nextIndex % 2 == 0) {
+                    nextIndex -= 1;
                 }
             }
         }
-        
-        // Limites de Segurança
         if (nextIndex < 0) nextIndex = 0;
         if (nextIndex >= totalPages) nextIndex = totalPages - 1;
-
         currentIndex = nextIndex;
         updateView();
     }

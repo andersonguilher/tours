@@ -82,7 +82,8 @@ CREATE TABLE IF NOT EXISTS `tour_progress` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
--- Tabela 5: Histórico (tour_history)
+-- Tabela 5: Histórico (tour_history) - ATUALIZADA
+-- Adicionadas colunas duration_minutes, dep_icao, arr_icao
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tour_history` (
   `id` INT NOT NULL AUTO_INCREMENT,
@@ -91,6 +92,9 @@ CREATE TABLE IF NOT EXISTS `tour_history` (
   `leg_id` INT NOT NULL,
   `callsign` VARCHAR(20) NULL,
   `aircraft` VARCHAR(10) NULL,
+  `dep_icao` CHAR(4) NOT NULL COMMENT 'Salvo para performance do logbook',
+  `arr_icao` CHAR(4) NOT NULL COMMENT 'Salvo para performance do logbook',
+  `duration_minutes` INT DEFAULT 0 COMMENT 'Essencial para o Ranking',
   `network` VARCHAR(20) DEFAULT 'IVAO',
   `landing_rate` INT NULL,
   `date_flown` DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -124,18 +128,53 @@ CREATE TABLE IF NOT EXISTS `tour_pilot_badges` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
--- Tabela 7: Rastreio ao vivo (SQL)
+-- Tabela 7: Rastreio ao vivo (tour_live_sessions)
 -- -----------------------------------------------------
-CREATE TABLE IF NOT EXISTS tour_live_sessions (
-    pilot_id INT NOT NULL,
-    tour_id INT NOT NULL,
-    leg_id INT NOT NULL,
-    start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-    state VARCHAR(20) DEFAULT 'Pre-Flight',
-    arrival_checks INT DEFAULT 0 COMMENT 'Contador para confirmar pouso',
-    PRIMARY KEY (pilot_id),
-    UNIQUE KEY unique_flight (pilot_id, tour_id, leg_id)
-);
+CREATE TABLE IF NOT EXISTS `tour_live_sessions` (
+    `pilot_id` INT NOT NULL,
+    `tour_id` INT NOT NULL,
+    `leg_id` INT NOT NULL,
+    `start_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `last_seen` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `state` VARCHAR(20) DEFAULT 'Pre-Flight',
+    `arrival_checks` INT DEFAULT 0,
+    PRIMARY KEY (`pilot_id`),
+    UNIQUE KEY `unique_flight` (`pilot_id`, `tour_id`, `leg_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------
+-- Tabela 8: Patentes / Rankings (tour_ranks) - NOVA
+-- Essencial para o RankSystem.php e admin/manage_ranks.php
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tour_ranks` (
+    `id` INT NOT NULL AUTO_INCREMENT,
+    `rank_title` VARCHAR(50) NOT NULL,
+    `min_hours` INT NOT NULL,
+    `stripes` INT DEFAULT 1,
+    `has_star` TINYINT(1) DEFAULT 0,
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Inserção de dados padrão para Rankings
+INSERT INTO `tour_ranks` (`rank_title`, `min_hours`, `stripes`, `has_star`) VALUES 
+('Aluno Piloto', 0, 1, 0),
+('Segundo Oficial', 10, 2, 0),
+('Primeiro Oficial', 30, 2, 0),
+('Comandante', 80, 3, 0),
+('Comandante Sênior', 200, 4, 0),
+('Comandante Master', 500, 4, 1),
+('Lenda da Kafly', 1000, 4, 1);
+
+-- -----------------------------------------------------
+-- Tabela 9: Dados Persistentes do Piloto (tour_pilots) - NOVA
+-- Armazena a última localização para o Dashboard
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tour_pilots` (
+    `pilot_id` INT NOT NULL,
+    `current_location` CHAR(4) DEFAULT 'SBGL',
+    `total_hours` INT DEFAULT 0,
+    `last_flight` DATETIME NULL,
+    PRIMARY KEY (`pilot_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;
