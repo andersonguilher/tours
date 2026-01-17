@@ -271,6 +271,18 @@ $rules = json_decode($tour['rules_json'], true);
                             </button>
                         </form>
                         <p class="text-center text-[10px] text-slate-500 mt-2">Ao iniciar, sua primeira perna será ativada.</p>
+                    
+                    <?php elseif ($tourStatus == 'Completed'): ?>
+                        <div class="text-center space-y-3">
+                            <div class="text-green-500 font-bold text-lg flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-trophy"></i> Tour Concluído!
+                            </div>
+                            <a href="certificate.php?tour_id=<?php echo $tour_id; ?>" target="_blank" class="block w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 rounded-xl shadow-lg transition flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-file-pdf"></i> Baixar Certificado
+                            </a>
+                            <p class="text-[10px] text-slate-500">Parabéns comandante! O seu certificado oficial já está disponível.</p>
+                        </div>
+
                     <?php else: ?>
                         <div class="text-center text-slate-500 text-xs italic">
                             <i class="fa-solid fa-circle-info text-blue-500 mr-1"></i> Tour em andamento. Bons voos!
