@@ -1,6 +1,6 @@
 <?php
-// view_tour.php
-// VERSÃO FINAL: Mapa com Status + Datas + METAR + Scenery + Link Passaporte
+// pilots/view_tour.php
+// VERSÃO FINAL: Mapa + Datas + METAR + Scenery + SOS Button
 
 // 1. WORDPRESS & LOGIN
 $wpLoadPath = __DIR__ . '/../../../wp-load.php';
@@ -52,8 +52,8 @@ if (empty($simbrief_number)) $simbrief_number = '9999';
 $display_callsign = $simbrief_airline . $simbrief_number;
 
 // 4. DADOS DO TOUR
-$tour_id = $_GET['id'] ?? 0;
-if ($tour_id == 0) die("ID Inválido");
+$tour_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
+if (!$tour_id) die("ID Inválido");
 
 $stmt = $pdo->prepare("SELECT * FROM tours WHERE id = ?");
 $stmt->execute([$tour_id]);
@@ -161,7 +161,6 @@ $rules = json_decode($tour['rules_json'], true);
         ::-webkit-scrollbar-track { background: #0f172a; } 
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
         .flag-icon { width: 20px; height: 14px; object-fit: cover; border-radius: 2px; display: inline-block; }
-        .glass-panel { background: rgba(30, 41, 59, 0.95); border-right: 1px solid rgba(255,255,255,0.08); }
         .glass-card { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
         .btn-glow { animation: glow 2s infinite; }
         @keyframes glow { 0% { box-shadow: 0 0 5px #22c55e; } 50% { box-shadow: 0 0 20px #22c55e; } 100% { box-shadow: 0 0 5px #22c55e; } }
@@ -188,13 +187,10 @@ $rules = json_decode($tour['rules_json'], true);
             <h1 class="font-bold text-lg text-white truncate"><?php echo htmlspecialchars($tour['title']); ?></h1>
         </div>
         <div class="flex items-center gap-4">
-            
             <a href="passport.php" class="text-slate-400 hover:text-yellow-400 transition" title="Ver Passaporte">
                 <i class="fa-solid fa-passport text-xl"></i>
             </a>
-            
             <div class="h-8 w-px bg-slate-800"></div>
-
             <div class="text-right">
                 <div class="text-[10px] text-slate-500 uppercase font-bold">Matrícula</div>
                 <div class="font-bold font-mono text-yellow-400 text-sm"><?php echo $display_callsign; ?></div>
@@ -365,6 +361,12 @@ $rules = json_decode($tour['rules_json'], true);
                                 <?php endif; ?>
                             </div>
 
+                            <div class="mt-2 pt-2 border-t border-white/10 text-center">
+                                <button onclick="requestManualValidation(<?php echo $leg['id']; ?>, '<?php echo $leg['dep_icao']; ?>', '<?php echo $leg['arr_icao']; ?>')" class="text-[10px] text-slate-400 hover:text-white underline decoration-dotted">
+                                    <i class="fa-solid fa-triangle-exclamation"></i> Validar Manualmente
+                                </button>
+                            </div>
+
                         </div>
                         <?php endif; ?>
 
@@ -452,6 +454,12 @@ $rules = json_decode($tour['rules_json'], true);
             map.fitBounds(bounds, {padding: [80, 80]});
         } else {
             map.setView([20, -40], 3); 
+        }
+
+        function requestManualValidation(legId, dep, arr) {
+            const msg = `Olá! Sou o piloto <?php echo $display_callsign; ?> e preciso validar manualmente a perna ID ${legId} (${dep}-${arr}) do Tour <?php echo $tour_id; ?>. Segue meu comprovante/report.`;
+            // Troque o número abaixo pelo WhatsApp da Staff ou redirecione para Discord
+            window.open(`https://wa.me/5521999999999?text=${encodeURIComponent(msg)}`, '_blank');
         }
     </script>
 </body>

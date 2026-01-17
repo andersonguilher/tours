@@ -1,6 +1,6 @@
 <?php
 // pilots/index.php
-// VITRINE DE TOURS - Integração WP + Dual DB + Datas de Vigência + Link Passaporte
+// VITRINE DE TOURS - Integração WP + Dual DB + Datas de Vigência + Link Passaporte + RANKING
 
 // 1. CARREGAR WORDPRESS
 $wpLoadPath = __DIR__ . '/../../../wp-load.php';
@@ -88,7 +88,7 @@ $today = date('Y-m-d');
 </head>
 <body class="text-white font-sans min-h-screen">
 
-    <nav class="h-16 bg-slate-950 border-b border-slate-800 flex justify-between items-center px-6 sticky top-0 z-50">
+    <nav class="h-16 bg-slate-950 border-b border-slate-800 flex justify-between items-center px-6 sticky top-0 z-50 shadow-lg">
         <div class="flex items-center gap-2">
             <i class="fa-solid fa-earth-americas text-blue-500 text-xl"></i>
             <span class="font-bold text-lg tracking-widest">SKY<span class="text-blue-500">TOURS</span></span>
@@ -96,7 +96,14 @@ $today = date('Y-m-d');
         
         <div class="flex items-center gap-6 text-sm">
             
-            <a href="passport.php" class="group flex items-center gap-2 text-slate-400 hover:text-yellow-400 transition" title="Ver meu Passaporte">
+            <a href="rankings.php" class="group flex items-center gap-2 text-slate-400 hover:text-yellow-400 transition" title="Ver Ranking Global">
+                <i class="fa-solid fa-trophy text-lg group-hover:scale-110 transition text-yellow-600 group-hover:text-yellow-400"></i>
+                <span class="hidden md:inline font-bold">Ranking</span>
+            </a>
+
+            <div class="h-6 w-px bg-slate-800 hidden sm:block"></div>
+
+            <a href="passport.php" class="group flex items-center gap-2 text-slate-400 hover:text-blue-400 transition" title="Ver meu Passaporte">
                 <i class="fa-solid fa-passport text-xl group-hover:scale-110 transition"></i>
                 <span class="hidden md:inline font-bold">Passaporte</span>
             </a>
