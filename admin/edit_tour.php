@@ -59,6 +59,15 @@ $rules = json_decode($tour['rules_json'], true);
                             <option value="Hard" <?php if($tour['difficulty']=='Hard') echo 'selected'; ?>>Hard</option>
                         </select>
                     </div>
+
+                    <div>
+                        <label class="label-admin">Data de Início</label>
+                        <input type="date" name="start_date" value="<?php echo $tour['start_date']; ?>" class="input-admin">
+                    </div>
+                    <div>
+                        <label class="label-admin">Data de Término</label>
+                        <input type="date" name="end_date" value="<?php echo $tour['end_date']; ?>" class="input-admin">
+                    </div>
                     
                     <div class="md:col-span-2">
                         <label class="label-admin">Banner (Deixe vazio para manter o atual)</label>

@@ -1,14 +1,12 @@
 <?php
 // admin/process_tour.php
-// Lógica de Upload + Banco de Dados
+// Lógica de Upload + Banco de Dados + Datas
 require '../config/db.php';
 
 $action = $_POST['action'] ?? '';
 
 // Função auxiliar para Upload
 function uploadBanner($fileInputName) {
-    // Define a pasta de destino (cria se não existir)
-    // Caminho relativo ao script process_tour.php
     $targetDir = "../assets/banners/";
     if (!file_exists($targetDir)) {
         mkdir($targetDir, 0777, true);
@@ -17,25 +15,18 @@ function uploadBanner($fileInputName) {
     if (isset($_FILES[$fileInputName]) && $_FILES[$fileInputName]['error'] == 0) {
         $fileTmpPath = $_FILES[$fileInputName]['tmp_name'];
         $fileName    = $_FILES[$fileInputName]['name'];
-        $fileSize    = $_FILES[$fileInputName]['size'];
-        $fileType    = $_FILES[$fileInputName]['type'];
         
-        // Pega a extensão
         $fileNameCmps = explode(".", $fileName);
         $fileExtension = strtolower(end($fileNameCmps));
 
-        // Sanitiza nome (tour_timestamp.ext)
         $newFileName = 'tour_' . time() . '.' . $fileExtension;
         $dest_path = $targetDir . $newFileName;
 
         if(move_uploaded_file($fileTmpPath, $dest_path)) {
-            // Retorna o caminho para salvar no banco
-            // Como o view_tour.php está em /pilots/ e a imagem em /assets/,
-            // o caminho deve ser "../assets/banners/..."
             return "../assets/banners/" . $newFileName;
         }
     }
-    return null; // Falha ou nenhum arquivo enviado
+    return null;
 }
 
 // --- CRIAR ---
@@ -44,8 +35,10 @@ if ($action == 'create') {
     $desc  = $_POST['description'];
     $diff  = $_POST['difficulty'];
     
-    // Processa Upload (Obrigatório na criação?)
-    // Se falhar, você pode colocar uma imagem padrão placeholder
+    // Novas Variáveis de Data
+    $start_date = !empty($_POST['start_date']) ? $_POST['start_date'] : null;
+    $end_date   = !empty($_POST['end_date'])   ? $_POST['end_date']   : null;
+    
     $bannerPath = uploadBanner('banner_file');
     if (!$bannerPath) {
         $bannerPath = 'https://via.placeholder.com/1920x400?text=Sem+Banner';
@@ -53,9 +46,10 @@ if ($action == 'create') {
 
     $rules = json_encode($_POST['rules']);
 
-    $sql = "INSERT INTO tours (title, description, difficulty, banner_url, rules_json, status) VALUES (?, ?, ?, ?, ?, 1)";
+    // Inserção com datas
+    $sql = "INSERT INTO tours (title, description, difficulty, start_date, end_date, banner_url, rules_json, status) VALUES (?, ?, ?, ?, ?, ?, ?, 1)";
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([$title, $desc, $diff, $bannerPath, $rules]);
+    $stmt->execute([$title, $desc, $diff, $start_date, $end_date, $bannerPath, $rules]);
     
     $newId = $pdo->lastInsertId();
     header("Location: manage_legs.php?tour_id=$newId");
@@ -69,18 +63,20 @@ if ($action == 'update') {
     $desc  = $_POST['description'];
     $diff  = $_POST['difficulty'];
     $status= $_POST['status'];
+
+    // Novas Variáveis de Data
+    $start_date = !empty($_POST['start_date']) ? $_POST['start_date'] : null;
+    $end_date   = !empty($_POST['end_date'])   ? $_POST['end_date']   : null;
     
-    // Verifica se enviou nova imagem
     $newBanner = uploadBanner('banner_file');
-    
-    // Se enviou, usa a nova. Se não, mantém a antiga (hidden field)
     $bannerPath = $newBanner ? $newBanner : $_POST['old_banner_url'];
 
     $rules = json_encode($_POST['rules']);
 
-    $sql = "UPDATE tours SET title=?, description=?, difficulty=?, banner_url=?, rules_json=?, status=? WHERE id=?";
+    // Update com datas
+    $sql = "UPDATE tours SET title=?, description=?, difficulty=?, start_date=?, end_date=?, banner_url=?, rules_json=?, status=? WHERE id=?";
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([$title, $desc, $diff, $bannerPath, $rules, $status, $id]);
+    $stmt->execute([$title, $desc, $diff, $start_date, $end_date, $bannerPath, $rules, $status, $id]);
     
     header("Location: index.php");
     exit;
@@ -90,16 +86,6 @@ if ($action == 'update') {
 if ($action == 'delete') {
     $id = $_POST['id'];
     
-    // Opcional: Deletar a imagem do servidor para não acumular lixo
-    /*
-    $stmt = $pdo->prepare("SELECT banner_url FROM tours WHERE id = ?");
-    $stmt->execute([$id]);
-    $row = $stmt->fetch();
-    if ($row && file_exists(__DIR__ . '/' . $row['banner_url'])) {
-        unlink(__DIR__ . '/' . $row['banner_url']);
-    }
-    */
-
     $pdo->prepare("DELETE FROM pilot_tour_progress WHERE tour_id = ?")->execute([$id]);
     $pdo->prepare("DELETE FROM tour_legs WHERE tour_id = ?")->execute([$id]);
     $pdo->prepare("DELETE FROM tours WHERE id = ?")->execute([$id]);

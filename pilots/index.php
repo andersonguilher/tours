@@ -1,13 +1,12 @@
 <?php
 // pilots/index.php
-// VITRINE DE TOURS - Integração WP + Dual DB
+// VITRINE DE TOURS - Integração WP + Dual DB + Datas de Vigência
 
 // 1. CARREGAR WORDPRESS
 $wpLoadPath = __DIR__ . '/../../../wp-load.php';
 if (file_exists($wpLoadPath)) { require_once $wpLoadPath; } else { die("Erro: WP não encontrado."); }
 
 if (!is_user_logged_in()) {
-    // Redireciona para login se não estiver logado
     $loginUrl = wp_login_url('https://'.$_SERVER['HTTP_HOST'].$_SERVER['REQUEST_URI']);
     echo "<script>window.location.href='$loginUrl';</script>";
     exit;
@@ -16,7 +15,7 @@ if (!is_user_logged_in()) {
 $current_user = wp_get_current_user();
 $wp_user_id = $current_user->ID;
 
-// 2. CONFIGURAÇÕES (Para saber tabela de pilotos)
+// 2. CONFIGURAÇÕES
 $settingsFile = __DIR__ . '/../../settings.json'; 
 $tb_pilotos = 'Dados_dos_Pilotos'; 
 $col_matricula = 'matricula';
@@ -31,10 +30,9 @@ if (file_exists($settingsFile)) {
 }
 
 // 3. CONEXÃO DUPLA
-require '../config/db.php'; // $pdo (Tracker/Tours)
+require '../config/db.php'; 
 
-// Busca Matrícula (Banco Principal)
-$display_callsign = strtoupper($current_user->user_login); // Fallback
+$display_callsign = strtoupper($current_user->user_login); 
 try {
     $host_p = defined('DB_SERVERNAME') ? DB_SERVERNAME : 'localhost';
     $user_p = defined('DB_PILOTOS_USER') ? DB_PILOTOS_USER : 'root';
@@ -54,13 +52,13 @@ try {
     // Mantém fallback
 }
 
-// 4. BUSCA TOURS E PROGRESSO
+// 4. BUSCA TOURS
 try {
-    // Todos os tours ativos
-    $stmt = $pdo->query("SELECT * FROM tours WHERE status = 1 ORDER BY id DESC");
+    // Busca tours ativos (status=1)
+    // Vamos filtrar as datas na exibição ou aqui, preferencialmente na exibição para mostrar "Em Breve"
+    $stmt = $pdo->query("SELECT * FROM tours WHERE status = 1 ORDER BY start_date DESC, id DESC");
     $tours = $stmt->fetchAll();
 
-    // Progresso do piloto
     $progresso = [];
     $stmtProg = $pdo->prepare("SELECT tour_id, status FROM pilot_tour_progress WHERE pilot_id = ?");
     $stmtProg->execute([$wp_user_id]);
@@ -70,6 +68,13 @@ try {
 } catch (PDOException $e) {
     die("Erro ao carregar tours: " . $e->getMessage());
 }
+
+// Helper de Data
+function formatarData($date) {
+    if (!$date) return "Indefinido";
+    return date("d/m/Y", strtotime($date));
+}
+$today = date('Y-m-d');
 ?>
 
 <!DOCTYPE html>
@@ -80,12 +85,7 @@ try {
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { background-color: #0f172a; } /* Slate 900 */
-        .glass-panel {
-            background: rgba(30, 41, 59, 0.7);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-        }
+        body { background-color: #0f172a; } 
     </style>
 </head>
 <body class="text-white font-sans min-h-screen">
@@ -112,7 +112,7 @@ try {
                 Missões & Eventos
             </h1>
             <p class="text-slate-400 max-w-2xl mx-auto">
-                Selecione um tour para iniciar sua jornada. Complete todas as pernas para ganhar medalhas e horas exclusivas.
+                Selecione um tour para iniciar sua jornada. Fique atento às datas de vigência.
             </p>
         </div>
 
@@ -126,33 +126,62 @@ try {
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             <?php foreach($tours as $tour): ?>
                 <?php 
-                    $status = $progresso[$tour['id']] ?? 'New';
+                    $userStatus = $progresso[$tour['id']] ?? 'New';
                     
-                    // Configuração Visual do Card
+                    // --- LÓGICA DE DATAS E STATUS ---
+                    $isUpcoming = ($tour['start_date'] && $today < $tour['start_date']);
+                    $isClosed   = ($tour['end_date'] && $today > $tour['end_date']);
+                    
+                    // Padrão (Aberto/Novo)
                     $badgeClass = "bg-blue-600";
                     $badgeText = "NOVO";
                     $btnText = "Iniciar Tour";
                     $btnClass = "bg-blue-600 hover:bg-blue-500 shadow-blue-900/20";
                     $borderClass = "border-slate-700";
+                    $btnDisabled = false;
+                    $overlayIcon = "";
 
-                    if ($status == 'In Progress') {
+                    // Lógica de Estado do Usuário
+                    if ($userStatus == 'In Progress') {
                         $badgeClass = "bg-yellow-500 text-yellow-950";
                         $badgeText = "EM ANDAMENTO";
                         $btnText = "Continuar";
                         $btnClass = "bg-yellow-500 hover:bg-yellow-400 text-yellow-950 shadow-yellow-900/20";
                         $borderClass = "border-yellow-500/50";
-                    } elseif ($status == 'Completed') {
+                    } elseif ($userStatus == 'Completed') {
                         $badgeClass = "bg-green-500 text-green-950";
                         $badgeText = "CONCLUÍDO";
                         $btnText = "Ver Conquista";
                         $btnClass = "bg-green-600 hover:bg-green-500 shadow-green-900/20";
                         $borderClass = "border-green-500/50";
                     }
+
+                    // Lógica de Datas (Sobrescreve se necessário)
+                    if ($isUpcoming) {
+                        $badgeClass = "bg-slate-600";
+                        $badgeText = "EM BREVE";
+                        $btnText = "Disponível em " . formatarData($tour['start_date']);
+                        $btnClass = "bg-slate-700 text-slate-400 cursor-not-allowed";
+                        $btnDisabled = true;
+                        $overlayIcon = "<div class='absolute inset-0 bg-black/50 z-20 flex items-center justify-center'><i class='fa-solid fa-clock text-4xl text-white/50'></i></div>";
+                    } elseif ($isClosed) {
+                        $badgeClass = "bg-red-600";
+                        $badgeText = "ENCERRADO";
+                        // Se completou, deixa ver, se não, bloqueia
+                        if ($userStatus != 'Completed') {
+                            $btnText = "Evento Encerrado";
+                            $btnClass = "bg-red-900/50 text-red-400 cursor-not-allowed border border-red-900";
+                            $btnDisabled = true;
+                        } else {
+                            $btnText = "Ver Histórico"; // Permite ver se já completou
+                        }
+                    }
                 ?>
 
-                <div class="group bg-slate-800 rounded-2xl overflow-hidden shadow-xl hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 border <?php echo $borderClass; ?> flex flex-col h-full">
+                <div class="group bg-slate-800 rounded-2xl overflow-hidden shadow-xl hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 border <?php echo $borderClass; ?> flex flex-col h-full relative">
                     
                     <div class="h-48 bg-cover bg-center relative" style="background-image: url('<?php echo htmlspecialchars($tour['banner_url']); ?>');">
+                        <?php echo $overlayIcon; ?>
                         <div class="absolute inset-0 bg-gradient-to-t from-slate-900 to-transparent opacity-90"></div>
                         
                         <div class="absolute top-4 left-4">
@@ -173,14 +202,31 @@ try {
                             <?php echo htmlspecialchars($tour['title']); ?>
                         </h3>
                         
+                        <div class="flex items-center gap-4 text-[10px] text-slate-400 mb-4 font-mono uppercase">
+                            <div title="Início">
+                                <i class="fa-regular fa-calendar-plus text-blue-500"></i> 
+                                <?php echo formatarData($tour['start_date']); ?>
+                            </div>
+                            <div title="Término">
+                                <i class="fa-regular fa-calendar-xmark text-red-500"></i> 
+                                <?php echo formatarData($tour['end_date']); ?>
+                            </div>
+                        </div>
+
                         <div class="text-sm text-slate-400 mb-6 line-clamp-3 leading-relaxed">
                             <?php echo strip_tags($tour['description']); ?>
                         </div>
 
                         <div class="mt-auto">
-                            <a href="view_tour.php?id=<?php echo $tour['id']; ?>" class="block w-full text-center <?php echo $btnClass; ?> text-white font-bold py-3 rounded-xl transition shadow-lg flex items-center justify-center gap-2">
-                                <?php echo $btnText; ?> <i class="fa-solid fa-arrow-right"></i>
-                            </a>
+                            <?php if($btnDisabled): ?>
+                                <button disabled class="block w-full text-center <?php echo $btnClass; ?> font-bold py-3 rounded-xl transition shadow-lg flex items-center justify-center gap-2">
+                                    <?php echo $btnText; ?>
+                                </button>
+                            <?php else: ?>
+                                <a href="view_tour.php?id=<?php echo $tour['id']; ?>" class="block w-full text-center <?php echo $btnClass; ?> text-white font-bold py-3 rounded-xl transition shadow-lg flex items-center justify-center gap-2">
+                                    <?php echo $btnText; ?> <i class="fa-solid fa-arrow-right"></i>
+                                </a>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>

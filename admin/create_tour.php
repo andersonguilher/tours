@@ -20,7 +20,7 @@ require '../config/db.php';
     <div class="bg-white shadow-xl rounded-2xl overflow-hidden">
         <div class="bg-blue-900 p-6 text-white">
             <h1 class="text-2xl font-bold"><i class="fa-solid fa-plus-circle mr-2"></i> Criar Novo Tour</h1>
-            <p class="text-blue-200 text-sm">Preencha os detalhes operacionais.</p>
+            <p class="text-blue-200 text-sm">Preencha os detalhes operacionais e vigência.</p>
         </div>
         
         <form action="process_tour.php" method="POST" enctype="multipart/form-data" class="p-8 space-y-8">
@@ -40,6 +40,17 @@ require '../config/db.php';
                             <option value="Medium">🟡 Intermediário (Medium)</option>
                             <option value="Hard">🔴 Avançado (Hard)</option>
                         </select>
+                    </div>
+
+                    <div>
+                        <label class="label-admin">Data de Início (Opcional)</label>
+                        <input type="date" name="start_date" class="input-admin">
+                        <p class="text-[10px] text-gray-500 mt-1">Deixe em branco para início imediato.</p>
+                    </div>
+                    <div>
+                        <label class="label-admin">Data de Término (Opcional)</label>
+                        <input type="date" name="end_date" class="input-admin">
+                        <p class="text-[10px] text-gray-500 mt-1">Deixe em branco para permanente.</p>
                     </div>
                     
                     <div class="md:col-span-2">
