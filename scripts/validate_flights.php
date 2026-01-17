@@ -1,6 +1,6 @@
 <?php
 // validate_flights.php
-// FINAL VERSION: Dual Database Connection (Pilots DB + Tracker DB)
+// FINAL VERSION: Dual Database Connection (Pilots DB + Tracker DB) + Discord + Landing Rate
 // Runs via Cron every 2 minutes
 
 define('BASE_PATH', '/var/www/kafly_user/data/www/kafly.com.br');
@@ -11,10 +11,9 @@ require BASE_PATH . '/dash/tours/config/db.php';
 // 2. Load Settings & Create Pilot Database Connection
 $settingsPath = BASE_PATH . '/dash/settings.json';
 $tb_pilotos = 'Dados_dos_Pilotos';
-$col_vid    = 'ivao_id'; // Default to IVAO ID column
+$col_vid    = 'ivao_id'; 
 $col_matr   = 'matricula';
 
-// Load settings.json to get table/column names
 if (file_exists($settingsPath)) {
     $settings = json_decode(file_get_contents($settingsPath), true);
     if (isset($settings['database_mappings']['pilots_table'])) 
@@ -25,9 +24,7 @@ if (file_exists($settingsPath)) {
     if (isset($cols['matricula'])) $col_matr = $cols['matricula'];
 }
 
-// Create connection to the MAIN database (where pilots register)
 try {
-    // These constants come from the included config/db.php (which loads config_db.php)
     $host_p = defined('DB_SERVERNAME') ? DB_SERVERNAME : 'localhost';
     $user_p = defined('DB_PILOTOS_USER') ? DB_PILOTOS_USER : 'root';
     $pass_p = defined('DB_PILOTOS_PASS') ? DB_PILOTOS_PASS : '';
@@ -59,16 +56,12 @@ echo "Processing " . count($pilotsOnline) . " online connections...\n";
 // 4. Validation Loop
 foreach ($pilotsOnline as $flight) {
     
-    $networkId = $flight['userId'] ?? null; // VID
+    $networkId = $flight['userId'] ?? null; 
     $liveCallsign = strtoupper($flight['callsign'] ?? '');
     
     if (!$networkId) continue;
 
-    // --- A. Identify Pilot in MAIN DB ---
-    // We look for the VID in the pilot table to get their internal ID and registered callsign
     try {
-        // We need the internal ID (id_piloto or post_id) to link to the Tour progress
-        // Let's grab both just in case
         $sql = "SELECT id_piloto, post_id, $col_matr as matricula FROM $tb_pilotos WHERE $col_vid = ? LIMIT 1";
         $stmtPilot = $pdoPilots->prepare($sql);
         $stmtPilot->execute([$networkId]);
@@ -78,17 +71,13 @@ foreach ($pilotsOnline as $flight) {
         continue;
     }
 
-    if (!$pilotDB) continue; // Not a registered pilot
+    if (!$pilotDB) continue; 
 
-    // Use the ID that matches your WP ID structure (likely post_id or id_piloto)
-    // IMPORTANT: The tour progress table uses the WP User ID. 
-    // Ensure this variable matches what you used in view_tour.php ($wp_user_id)
     $pilotId = $pilotDB['post_id'] ?? $pilotDB['id_piloto']; 
     $dbCallsign = strtoupper($pilotDB['matricula']);
 
-    // --- B. Validate Callsign ---
     if ($liveCallsign !== $dbCallsign) {
-        echo " -> Pilot ID $pilotId flying with wrong callsign ($liveCallsign). Expected: $dbCallsign. Skipping.\n";
+        // echo " -> Pilot ID $pilotId flying with wrong callsign ($liveCallsign). Expected: $dbCallsign. Skipping.\n";
         continue; 
     }
 
@@ -106,13 +95,12 @@ foreach ($pilotsOnline as $flight) {
         'aircraft'      => $flightPlan['aircraft']['icaoCode'] ?? '',
         'state'         => $lastTrack['state'] ?? '',
         'on_ground'     => $lastTrack['onGround'] ?? false,
-        'groundspeed'   => $lastTrack['groundSpeed'] ?? 0
+        'groundspeed'   => $lastTrack['groundSpeed'] ?? 0,
+        'vertical_speed'=> $lastTrack['verticalSpeed'] ?? 0
     ];
 
-    // --- C. Check Active Tour (in TRACKER DB) ---
-    // Uses the standard $pdo connection
     $stmt = $pdo->prepare("
-        SELECT p.id as progress_id, p.current_leg_id, t.rules_json, 
+        SELECT p.id as progress_id, p.current_leg_id, t.rules_json, t.id as tour_real_id, t.title as tour_title,
                l.dep_icao as leg_dep, l.arr_icao as leg_arr, l.id as leg_real_id
         FROM pilot_tour_progress p
         JOIN tours t ON p.tour_id = t.id
@@ -150,12 +138,18 @@ function validateLeg($legData, $pilotData, $pdo, $pilotId) {
     if ($isLanded) {
         echo "    -> LEG COMPLETED! {$pilotData['callsign']} landed at destination.\n";
         
-        // Save Log
+        // Tenta pegar o Landing Rate se disponível (negativo)
+        $landingRate = $pilotData['vertical_speed'];
+        
+        // Save Log with Landing Rate
         $stmtLog = $pdo->prepare("
-            INSERT INTO pilot_leg_history (pilot_id, tour_id, leg_id, callsign, aircraft, date_flown, network)
-            VALUES (?, (SELECT tour_id FROM pilot_tour_progress WHERE id = ?), ?, ?, ?, NOW(), 'IVAO')
+            INSERT INTO pilot_leg_history (pilot_id, tour_id, leg_id, callsign, aircraft, date_flown, network, landing_rate)
+            VALUES (?, (SELECT tour_id FROM pilot_tour_progress WHERE id = ?), ?, ?, ?, NOW(), 'IVAO', ?)
         ");
-        $stmtLog->execute([$pilotId, $legData['progress_id'], $legData['leg_real_id'], $pilotData['callsign'], $pilotData['aircraft']]);
+        $stmtLog->execute([$pilotId, $legData['progress_id'], $legData['leg_real_id'], $pilotData['callsign'], $pilotData['aircraft'], $landingRate]);
+
+        // Discord Notification
+        sendDiscordWebhook($pilotData['callsign'], $legData['tour_title'], "{$legData['leg_dep']} > {$legData['leg_arr']}");
 
         // Advance Leg
         $currentLegId = $legData['leg_real_id'];
@@ -174,7 +168,44 @@ function validateLeg($legData, $pilotData, $pdo, $pilotId) {
         } else {
             $stmtUpd = $pdo->prepare("UPDATE pilot_tour_progress SET status = 'Completed', completed_at = NOW() WHERE id = ?");
             $stmtUpd->execute([$legData['progress_id']]);
+            
+            // Notification for Full Tour Completion
+            sendDiscordWebhook($pilotData['callsign'], $legData['tour_title'], "🏆 TOUR FINALIZADO!");
         }
     }
+}
+
+function sendDiscordWebhook($callsign, $tourName, $details) {
+    // INSIRA SUA WEBHOOK URL AQUI
+    $webhookurl = "https://discord.com/api/webhooks/SEU_WEBHOOK_AQUI";
+
+    $timestamp = date("c", strtotime("now"));
+    $json_data = json_encode([
+        "username" => "Kafly Tour Tracker",
+        "embeds" => [
+            [
+                "title" => "✈️ Tour Progress Update",
+                "type" => "rich",
+                "color" => hexdec("3366ff"),
+                "fields" => [
+                    ["name" => "Pilot", "value" => $callsign, "inline" => true],
+                    ["name" => "Tour", "value" => $tourName, "inline" => true],
+                    ["name" => "Status", "value" => $details, "inline" => false]
+                ],
+                "footer" => ["text" => "Kafly Systems"],
+                "timestamp" => $timestamp
+            ]
+        ]
+    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+    $ch = curl_init($webhookurl);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-type: application/json'));
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $json_data);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
+    curl_setopt($ch, CURLOPT_HEADER, 0);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_exec($ch);
+    curl_close($ch);
 }
 ?>

@@ -1,7 +1,13 @@
 <?php
 // admin/process_tour.php
-// Lógica de Upload + Banco de Dados + Datas
+// Lógica de Upload + Banco de Dados + Datas + Cenários
 require '../config/db.php';
+
+// --- SEGURANÇA ---
+$wpLoadPath = __DIR__ . '/../../../wp-load.php';
+if (file_exists($wpLoadPath)) { require_once $wpLoadPath; }
+if (!is_user_logged_in() || !current_user_can('administrator')) { wp_die('Acesso Negado'); }
+// --- FIM SEGURANÇA ---
 
 $action = $_POST['action'] ?? '';
 
@@ -34,6 +40,7 @@ if ($action == 'create') {
     $title = $_POST['title'];
     $desc  = $_POST['description'];
     $diff  = $_POST['difficulty'];
+    $scenery = $_POST['scenery_link'] ?? null;
     
     // Novas Variáveis de Data
     $start_date = !empty($_POST['start_date']) ? $_POST['start_date'] : null;
@@ -46,10 +53,9 @@ if ($action == 'create') {
 
     $rules = json_encode($_POST['rules']);
 
-    // Inserção com datas
-    $sql = "INSERT INTO tours (title, description, difficulty, start_date, end_date, banner_url, rules_json, status) VALUES (?, ?, ?, ?, ?, ?, ?, 1)";
+    $sql = "INSERT INTO tours (title, description, difficulty, start_date, end_date, banner_url, rules_json, scenery_link, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)";
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([$title, $desc, $diff, $start_date, $end_date, $bannerPath, $rules]);
+    $stmt->execute([$title, $desc, $diff, $start_date, $end_date, $bannerPath, $rules, $scenery]);
     
     $newId = $pdo->lastInsertId();
     header("Location: manage_legs.php?tour_id=$newId");
@@ -63,6 +69,7 @@ if ($action == 'update') {
     $desc  = $_POST['description'];
     $diff  = $_POST['difficulty'];
     $status= $_POST['status'];
+    $scenery = $_POST['scenery_link'] ?? null;
 
     // Novas Variáveis de Data
     $start_date = !empty($_POST['start_date']) ? $_POST['start_date'] : null;
@@ -73,10 +80,9 @@ if ($action == 'update') {
 
     $rules = json_encode($_POST['rules']);
 
-    // Update com datas
-    $sql = "UPDATE tours SET title=?, description=?, difficulty=?, start_date=?, end_date=?, banner_url=?, rules_json=?, status=? WHERE id=?";
+    $sql = "UPDATE tours SET title=?, description=?, difficulty=?, start_date=?, end_date=?, banner_url=?, rules_json=?, scenery_link=?, status=? WHERE id=?";
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([$title, $desc, $diff, $start_date, $end_date, $bannerPath, $rules, $status, $id]);
+    $stmt->execute([$title, $desc, $diff, $start_date, $end_date, $bannerPath, $rules, $scenery, $status, $id]);
     
     header("Location: index.php");
     exit;

@@ -1,6 +1,6 @@
 <?php
 // pilots/index.php
-// VITRINE DE TOURS - Integração WP + Dual DB + Datas de Vigência
+// VITRINE DE TOURS - Integração WP + Dual DB + Datas de Vigência + Link Passaporte
 
 // 1. CARREGAR WORDPRESS
 $wpLoadPath = __DIR__ . '/../../../wp-load.php';
@@ -54,8 +54,6 @@ try {
 
 // 4. BUSCA TOURS
 try {
-    // Busca tours ativos (status=1)
-    // Vamos filtrar as datas na exibição ou aqui, preferencialmente na exibição para mostrar "Em Breve"
     $stmt = $pdo->query("SELECT * FROM tours WHERE status = 1 ORDER BY start_date DESC, id DESC");
     $tours = $stmt->fetchAll();
 
@@ -96,7 +94,15 @@ $today = date('Y-m-d');
             <span class="font-bold text-lg tracking-widest">SKY<span class="text-blue-500">TOURS</span></span>
         </div>
         
-        <div class="flex items-center gap-4 text-sm">
+        <div class="flex items-center gap-6 text-sm">
+            
+            <a href="passport.php" class="group flex items-center gap-2 text-slate-400 hover:text-yellow-400 transition" title="Ver meu Passaporte">
+                <i class="fa-solid fa-passport text-xl group-hover:scale-110 transition"></i>
+                <span class="hidden md:inline font-bold">Passaporte</span>
+            </a>
+            
+            <div class="h-8 w-px bg-slate-800 hidden sm:block"></div>
+
             <div class="text-right hidden sm:block">
                 <div class="text-[10px] text-slate-500 uppercase">Comandante</div>
                 <div class="font-bold font-mono text-yellow-400"><?php echo $display_callsign; ?></div>

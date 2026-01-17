@@ -3,16 +3,20 @@
 session_start();
 require '../config/db.php';
 
-// --- SEGURANÇA ---
-// (Adicione verificação de admin aqui futuramente)
+// --- SEGURANÇA: INTEGRAÇÃO WORDPRESS ---
+$wpLoadPath = __DIR__ . '/../../../wp-load.php';
+if (file_exists($wpLoadPath)) { 
+    require_once $wpLoadPath; 
+} else { 
+    die("Erro: WordPress não encontrado para verificação de segurança."); 
+}
 
-// 1. Buscar todos os tours cadastrados
-$stmt = $pdo->query("
-    SELECT t.*, 
-    (SELECT COUNT(*) FROM tour_legs WHERE tour_id = t.id) as total_legs 
-    FROM tours t 
-    ORDER BY t.id DESC
-");
+if (!is_user_logged_in() || !current_user_can('administrator')) {
+    wp_die('<h1>Acesso Negado</h1><p>Você não tem permissão para aceder a esta página.</p>', 'Erro de Permissão', ['response' => 403]);
+}
+// --- FIM SEGURANÇA ---
+
+$stmt = $pdo->query("SELECT t.*, (SELECT COUNT(*) FROM tour_legs WHERE tour_id = t.id) as total_legs FROM tours t ORDER BY t.id DESC");
 $tours = $stmt->fetchAll();
 ?>
 
@@ -35,7 +39,11 @@ $tours = $stmt->fetchAll();
                 ADMIN<span class="text-yellow-500">TOURS</span>
             </div>
             <div class="space-x-4 flex items-center">
-                <a href="settings.php" class="text-sm text-slate-400 hover:text-white transition" title="Configurações Globais">
+                <a href="manage_badges.php" class="text-sm text-yellow-400 hover:text-white transition font-bold" title="Gerenciar Medalhas">
+                    <i class="fa-solid fa-medal"></i> Medalhas
+                </a>
+                <span class="text-slate-700">|</span>
+                <a href="settings.php" class="text-sm text-slate-400 hover:text-white transition">
                     <i class="fa-solid fa-cog"></i> Configs
                 </a>
                 <span class="text-slate-700">|</span>
@@ -53,9 +61,14 @@ $tours = $stmt->fetchAll();
                 <h1 class="text-3xl font-bold text-slate-800">Gerenciamento de Tours</h1>
                 <p class="text-slate-500">Crie eventos e defina as rotas para os pilotos.</p>
             </div>
-            <a href="create_tour.php" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-blue-500/30 transition flex items-center gap-2">
-                <i class="fa-solid fa-plus"></i> Novo Tour
-            </a>
+            <div class="flex gap-3">
+                <a href="manage_badges.php" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-purple-500/30 transition flex items-center gap-2">
+                    <i class="fa-solid fa-medal"></i> Medalhas
+                </a>
+                <a href="create_tour.php" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-blue-500/30 transition flex items-center gap-2">
+                    <i class="fa-solid fa-plus"></i> Novo Tour
+                </a>
+            </div>
         </div>
 
         <?php if (count($tours) == 0): ?>

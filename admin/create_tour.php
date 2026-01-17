@@ -1,6 +1,12 @@
 <?php
 // admin/create_tour.php
 require '../config/db.php';
+
+// --- SEGURANÇA ---
+$wpLoadPath = __DIR__ . '/../../../wp-load.php';
+if (file_exists($wpLoadPath)) { require_once $wpLoadPath; }
+if (!is_user_logged_in() || !current_user_can('administrator')) { wp_die('Acesso Negado'); }
+// --- FIM SEGURANÇA ---
 ?>
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -75,6 +81,11 @@ require '../config/db.php';
                     <div>
                         <label class="label-admin">Descrição e Instruções</label>
                         <textarea name="description" rows="5" class="input-admin" placeholder="Instruções para os pilotos..."></textarea>
+                    </div>
+                    <div>
+                        <label class="label-admin">Link para Cenário (Sugestão)</label>
+                        <input type="url" name="scenery_link" class="input-admin" placeholder="https://flightsim.to/..." >
+                        <p class="text-[10px] text-gray-500 mt-1">Link direto para download ou loja.</p>
                     </div>
                 </div>
             </div>

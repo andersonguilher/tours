@@ -2,6 +2,12 @@
 // admin/edit_tour.php
 require '../config/db.php';
 
+// --- SEGURANÇA ---
+$wpLoadPath = __DIR__ . '/../../../wp-load.php';
+if (file_exists($wpLoadPath)) { require_once $wpLoadPath; }
+if (!is_user_logged_in() || !current_user_can('administrator')) { wp_die('Acesso Negado'); }
+// --- FIM SEGURANÇA ---
+
 $id = $_GET['id'] ?? 0;
 if ($id == 0) die("ID Inválido");
 
@@ -96,6 +102,10 @@ $rules = json_decode($tour['rules_json'], true);
             <div>
                 <h3 class="text-lg font-bold text-slate-700 border-b pb-2 mb-4">2. Briefing</h3>
                 <textarea name="description" rows="5" class="input-admin"><?php echo htmlspecialchars($tour['description']); ?></textarea>
+                <div class="mt-4">
+                    <label class="label-admin">Link para Cenário (Sugestão)</label>
+                    <input type="url" name="scenery_link" value="<?php echo htmlspecialchars($tour['scenery_link'] ?? ''); ?>" class="input-admin">
+                </div>
             </div>
 
             <div class="bg-yellow-50 p-6 rounded-xl border border-yellow-200">

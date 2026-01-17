@@ -1,6 +1,6 @@
 <?php
 // view_tour.php
-// VERSÃO FINAL: Mapa com Status Visual + Datas + Correção de Texto
+// VERSÃO FINAL: Mapa com Status + Datas + METAR + Scenery + Link Passaporte
 
 // 1. WORDPRESS & LOGIN
 $wpLoadPath = __DIR__ . '/../../../wp-load.php';
@@ -60,10 +60,16 @@ $stmt->execute([$tour_id]);
 $tour = $stmt->fetch();
 if (!$tour) die("Tour não encontrado.");
 
-// Helpers de Data
+// Helpers
 function formatarData($date) {
     if (!$date) return "Indefinido";
     return date("d/m/Y", strtotime($date));
+}
+
+function getMetar($icao) {
+    $url = "https://metar.vatsim.net/metar.php?id=" . $icao;
+    $metar = @file_get_contents($url);
+    return $metar ? trim($metar) : "Indisponível";
 }
 
 // 5. AÇÃO: INICIAR TOUR
@@ -182,6 +188,13 @@ $rules = json_decode($tour['rules_json'], true);
             <h1 class="font-bold text-lg text-white truncate"><?php echo htmlspecialchars($tour['title']); ?></h1>
         </div>
         <div class="flex items-center gap-4">
+            
+            <a href="passport.php" class="text-slate-400 hover:text-yellow-400 transition" title="Ver Passaporte">
+                <i class="fa-solid fa-passport text-xl"></i>
+            </a>
+            
+            <div class="h-8 w-px bg-slate-800"></div>
+
             <div class="text-right">
                 <div class="text-[10px] text-slate-500 uppercase font-bold">Matrícula</div>
                 <div class="font-bold font-mono text-yellow-400 text-sm"><?php echo $display_callsign; ?></div>
@@ -315,15 +328,34 @@ $rules = json_decode($tour['rules_json'], true);
                                     <span title="<?php echo $leg['arr_city']; ?>"><?php echo $fA . $leg['arr_icao']; ?></span>
                                 </div>
                             </div>
-                            
-                            <?php if($isCurrent): ?>
-                                <a href="<?php echo getSimBriefLink($leg, $simbrief_airline, $simbrief_number); ?>" target="_blank" class="bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold py-1 px-2 rounded shadow transition" title="Gerar OFP">
-                                    OFP
-                                </a>
-                            <?php else: ?>
+                            <?php if(!$isCurrent): ?>
                                 <?php echo $statusIcon; ?>
                             <?php endif; ?>
                         </div>
+
+                        <?php if($isCurrent): ?>
+                        <div class="mt-3 p-3 bg-black/30 rounded border border-white/10 text-xs space-y-2">
+                            
+                            <div class="font-mono text-cyan-300 border-b border-white/10 pb-2 mb-2">
+                                <div class="mb-1"><span class="font-bold text-white">METAR <?php echo $leg['dep_icao']; ?>:</span> <?php echo getMetar($leg['dep_icao']); ?></div>
+                                <div><span class="font-bold text-white">METAR <?php echo $leg['arr_icao']; ?>:</span> <?php echo getMetar($leg['arr_icao']); ?></div>
+                            </div>
+
+                            <div class="flex flex-wrap gap-2 mt-2">
+                                <a href="<?php echo getSimBriefLink($leg, $simbrief_airline, $simbrief_number); ?>" target="_blank" class="flex-1 text-center bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-3 rounded shadow transition">
+                                    <i class="fa-solid fa-file-contract"></i> Gerar OFP
+                                </a>
+                                
+                                <?php if(!empty($tour['scenery_link'])): ?>
+                                <a href="<?php echo htmlspecialchars($tour['scenery_link']); ?>" target="_blank" class="flex-1 text-center bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-3 rounded shadow transition">
+                                    <i class="fa-solid fa-map"></i> Cenário
+                                </a>
+                                <?php endif; ?>
+                            </div>
+
+                        </div>
+                        <?php endif; ?>
+
                     </div>
                     <?php endforeach; ?>
                 </div>
