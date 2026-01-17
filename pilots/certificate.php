@@ -1,56 +1,86 @@
 <?php
-// pilots/certificate.php - GERADOR DE CERTIFICADO PDF (FINAL COM 2 ASSINATURAS)
-require('fpdf.php');
-require '../config/db.php';
+// pilots/certificate.php - CORRIGIDO
+// Define que este script não deve enviar erros HTML para o navegador, pois quebraria o PDF
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 
-// --- SEGURANÇA E LOGIN ---
+// --- 1. CONFIGURAÇÃO DE CAMINHOS E BUFFERS ---
+// Define o caminho da fonte ANTES de carregar a biblioteca
+define('FPDF_FONTPATH', __DIR__ . '/font/');
+
+// Inicia o buffer para capturar qualquer "sujeira" que o WordPress soltar
+ob_start();
+
+// Carrega o WordPress
 $wpLoadPath = __DIR__ . '/../../../wp-load.php';
-if (file_exists($wpLoadPath)) { require_once $wpLoadPath; }
-if (!is_user_logged_in()) { die('Acesso restrito.'); }
+if (file_exists($wpLoadPath)) { 
+    require_once $wpLoadPath; 
+} else {
+    // Fallback de segurança se não achar o WP, para não dar erro 500 sem aviso
+    ob_end_clean();
+    die("Erro: WordPress não encontrado em $wpLoadPath");
+}
+
+if (!is_user_logged_in()) { 
+    ob_end_clean();
+    die('Acesso restrito.'); 
+}
 
 $current_user = wp_get_current_user();
 $wp_user_id = $current_user->ID;
 
-// --- DADOS DO TOUR ---
-$tour_id = $_GET['tour_id'] ?? 0;
-if ($tour_id == 0) die("ID Inválido");
+require '../config/db.php';
 
-// Verificar se o piloto REALMENTE completou o tour
-$stmt = $pdo->prepare("SELECT * FROM pilot_tour_progress WHERE pilot_id = ? AND tour_id = ? AND status = 'Completed'");
+// --- 2. VALIDAÇÃO DE DADOS ---
+$tour_id = filter_input(INPUT_GET, 'tour_id', FILTER_VALIDATE_INT);
+if (!$tour_id) { ob_end_clean(); die("ID Inválido"); }
+
+// Verificar progresso
+$stmt = $pdo->prepare("SELECT * FROM tour_progress WHERE pilot_id = ? AND tour_id = ? AND status = 'Completed'");
 $stmt->execute([$wp_user_id, $tour_id]);
 $progress = $stmt->fetch();
 
 if (!$progress) {
+    ob_end_clean();
     die("Certificado indisponível: Você ainda não completou este Tour.");
 }
 
-// Buscar detalhes do Tour
-$stmtTour = $pdo->prepare("SELECT * FROM tours WHERE id = ?");
+$stmtTour = $pdo->prepare("SELECT * FROM tour_tours WHERE id = ?");
 $stmtTour->execute([$tour_id]);
 $tour = $stmtTour->fetch();
 
-// --- CLASSE PDF CUSTOMIZADA ---
-class PDF extends FPDF {
+// --- 3. PREPARAÇÃO DO PDF ---
+
+// Limpa qualquer saída que o WordPress ou includes tenham gerado até agora
+// Isso remove espaços em branco, erros de notice, ou HTML de plugins
+if (ob_get_length()) ob_end_clean();
+
+// Carrega FPDF (Use require_once para evitar erro de redeclaração se um plugin já carregou)
+require_once('fpdf.php');
+
+// Renomeei a classe para KaflyPDF para evitar conflito se outro plugin usar "class PDF"
+class KaflyPDF extends FPDF {
     function Header() {
-        // Nada aqui para permitir design livre
+        // Nada aqui
     }
     
     function Footer() {
-        // Posicionamento fixo a 12mm do fundo
         $this->SetY(-12);
-        $this->SetFont('Arial','I',8);
+        // Tenta usar Arial, se falhar usa Helvetica (padrão do core)
+        $this->SetFont('Helvetica','I',8);
         $this->SetTextColor(150, 150, 150);
         $this->Cell(0,10,utf8_decode('Documento gerado automaticamente pelo sistema Kafly Tours - ' . date('d/m/Y H:i')),0,0,'C');
     }
 }
 
-// --- CONFIGURAÇÃO DA PÁGINA ---
-// A4 Paisagem (Landscape): 297mm x 210mm
-$pdf = new PDF('L','mm','A4'); 
-$pdf->SetAutoPageBreak(false); // IMPEDE QUEBRA DE PÁGINA AUTOMÁTICA
+// Cria o PDF
+$pdf = new KaflyPDF('L','mm','A4'); 
+$pdf->SetAutoPageBreak(false); 
 $pdf->AddPage();
 
-// 1. Moldura (Borda)
+// --- 4. DESIGN ---
+
+// Molduras
 $pdf->SetLineWidth(2);
 $pdf->SetDrawColor(218, 165, 32); // Dourado
 $pdf->Rect(10, 10, 277, 190);
@@ -58,95 +88,78 @@ $pdf->SetLineWidth(0.5);
 $pdf->SetDrawColor(0, 0, 0); // Preto
 $pdf->Rect(12, 12, 273, 186);
 
-// --- CONTEÚDO CENTRALIZADO ---
-
-// 2. Título Principal
-$pdf->SetY(40); // Posição Y fixa
-$pdf->SetFont('Times','B',36);
-$pdf->SetTextColor(25, 25, 112); // Midnight Blue
+// Título
+$pdf->SetY(40);
+// Tenta Times, fallback para padrão se der erro de arquivo
+$pdf->SetFont('Times','B',36); 
+$pdf->SetTextColor(25, 25, 112); 
 $pdf->Cell(0,15,utf8_decode('CERTIFICADO DE CONCLUSÃO'),0,1,'C');
 
-// 3. Texto Introdutório
+// Texto Intro
 $pdf->SetY(65);
-$pdf->SetFont('Arial','',14);
+$pdf->SetFont('Helvetica','',14); // Mudado de Arial para Helvetica (são iguais no FPDF e evita erro de arquivo map)
 $pdf->SetTextColor(100, 100, 100);
 $pdf->Cell(0,10,utf8_decode('Certificamos que o Comandante'),0,1,'C');
 
-// 4. Nome do Piloto
+// Nome Piloto
 $pdf->SetY(80);
 $pdf->SetFont('Times','B',32);
 $pdf->SetTextColor(0, 0, 0);
 $pdf->Cell(0,15,utf8_decode($current_user->display_name),0,1,'C');
 
 $pdf->SetY(95);
-$pdf->SetFont('Arial','',12);
+$pdf->SetFont('Helvetica','',12);
 $pdf->SetTextColor(80, 80, 80);
 $pdf->Cell(0,10,utf8_decode('(ID: ' . str_pad($wp_user_id, 4, '0', STR_PAD_LEFT) . ')'),0,1,'C');
 
-// 5. Texto do Tour
+// Texto Tour
 $pdf->SetY(115);
-$pdf->SetFont('Arial','',14);
+$pdf->SetFont('Helvetica','',14);
 $pdf->SetTextColor(100, 100, 100);
 $pdf->Cell(0,10,utf8_decode('Completou com êxito todas as etapas do evento:'),0,1,'C');
 
-// 6. Nome do Tour
+// Nome do Tour
 $pdf->SetY(130);
 $pdf->SetFont('Times','B',28);
-$pdf->SetTextColor(218, 165, 32); // Dourado
+$pdf->SetTextColor(218, 165, 32); 
 $pdf->Cell(0,15,utf8_decode($tour['title']),0,1,'C');
 
-// --- RODAPÉ E ASSINATURAS (POSIÇÃO FIXA NO FUNDO) ---
-$ySign = 165; // Altura fixa para as linhas de assinatura (aprox 4.5cm do fundo)
-
-// Configuração das Linhas
+// Assinaturas
+$ySign = 165;
 $pdf->SetDrawColor(50, 50, 50);
 $pdf->SetLineWidth(0.5);
 
-// ==========================================
-// ASSINATURA 1 (ESQUERDA) - DIRETOR DE OPERAÇÕES
-// ==========================================
-$pdf->Line(60, $ySign, 110, $ySign); // Linha
-
-// Rubrica 1 (Imagem)
-$rubricaDiretorPath = '../assets/signatures/rubrica_diretor.png';
+// Assinatura 1
+$pdf->Line(60, $ySign, 110, $ySign);
+$rubricaDiretorPath = __DIR__ . '/../assets/signatures/rubrica_diretor.png';
 if (file_exists($rubricaDiretorPath)) {
-    // Image(arquivo, x, y, largura)
     $pdf->Image($rubricaDiretorPath, 70, $ySign - 15, 30); 
 }
-
-// Texto Cargo
-$pdf->SetFont('Arial','B',10);
+$pdf->SetFont('Helvetica','B',10);
 $pdf->SetTextColor(0, 0, 0);
 $pdf->Text(63, $ySign+5, utf8_decode("Diretor de Operações"));
 
-
-// ==========================================
-// SELO DIGITAL (CENTRO)
-// ==========================================
+// Hash
 $pdf->SetXY(120, $ySign - 10);
 $pdf->SetFont('Courier','',8);
 $pdf->SetTextColor(150, 150, 150);
 $hash = md5($progress['completed_at'].$wp_user_id);
 $pdf->MultiCell(55, 4, utf8_decode("HASH DE VALIDAÇÃO:\n".$hash."\n".date('d/m/Y', strtotime($progress['completed_at']))), 0, 'C');
 
-
-// ==========================================
-// ASSINATURA 2 (DIREITA) - GESTOR DE EVENTOS
-// ==========================================
-$pdf->Line(190, $ySign, 240, $ySign); // Linha
-
-// Rubrica 2 (Imagem) - NOVA ADIÇÃO
-$rubricaEventosPath = '../assets/signatures/rubrica_eventos.png';
+// Assinatura 2
+$pdf->Line(190, $ySign, 240, $ySign);
+$rubricaEventosPath = __DIR__ . '/../assets/signatures/rubrica_eventos.png';
 if (file_exists($rubricaEventosPath)) {
-    // Ajuste X=200 para centralizar na linha que vai de 190 a 240
     $pdf->Image($rubricaEventosPath, 200, $ySign - 12, 30); 
 }
-
-// Texto Cargo
-$pdf->SetFont('Arial','B',10);
+$pdf->SetFont('Helvetica','B',10);
 $pdf->SetTextColor(0, 0, 0);
 $pdf->Text(198, $ySign+5, "Gestor de Eventos");
 
-// --- SAÍDA ---
+// --- 5. SAÍDA FINAL ---
+// Garante novamente que o buffer está limpo antes de enviar o binário
+if (ob_get_length()) ob_end_clean();
+
 $pdf->Output('I', 'Certificado_Tour_'.$tour_id.'.pdf'); 
+exit;
 ?>
