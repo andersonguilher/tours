@@ -93,9 +93,12 @@ if (!is_user_logged_in() || !current_user_can('administrator')) { wp_die('Acesso
             <div class="bg-blue-50 p-6 rounded-xl border border-blue-100">
                 <h3 class="text-lg font-bold text-blue-900 border-b border-blue-200 pb-2 mb-4">3. Regras de Validação</h3>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div>
+                    <div class="relative group-autocomplete">
                         <label class="label-admin text-blue-800">Aeronaves (ICAO)</label>
-                        <input type="text" name="rules[allowed_aircraft]" class="input-admin border-blue-200" placeholder="B738, A320">
+                        <input type="text" id="aircraftInput" name="rules[allowed_aircraft]" class="input-admin border-blue-200" placeholder="B738, A320" autocomplete="off">
+                        <div id="aircraftSuggestions" class="hidden absolute z-50 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto mt-1">
+                            </div>
+                        <p class="text-[10px] text-blue-400 mt-1">Separe por vírgula. Digite para buscar na base SimBrief.</p>
                     </div>
                     <div>
                         <label class="label-admin text-blue-800">Velocidade Máx. (< FL100)</label>
@@ -126,5 +129,80 @@ if (!is_user_logged_in() || !current_user_can('administrator')) { wp_die('Acesso
     .input-admin { width: 100%; border: 1px solid #cbd5e1; border-radius: 0.5rem; padding: 0.75rem; outline: none; transition: all 0.2s; }
     .input-admin:focus { ring: 2px; border-color: #3b82f6; }
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const input = document.getElementById('aircraftInput');
+    const suggestionsBox = document.getElementById('aircraftSuggestions');
+    let aircraftList = [];
+
+    // Carregar lista de aeronaves do backend
+    fetch('ajax_simbrief_aircraft.php')
+        .then(response => response.json())
+        .then(data => {
+            aircraftList = data; // Espera formato [{icao: 'A320', name: 'Airbus A320'}, ...]
+        })
+        .catch(err => console.error('Erro ao carregar aeronaves:', err));
+
+    input.addEventListener('input', function(e) {
+        const val = this.value;
+        const cursorPosition = this.selectionStart;
+        
+        // Identificar o termo atual (entre vírgulas onde está o cursor)
+        const lastComma = val.lastIndexOf(',', cursorPosition - 1);
+        const nextComma = val.indexOf(',', cursorPosition);
+        const start = lastComma + 1;
+        const end = nextComma === -1 ? val.length : nextComma;
+        
+        const currentTerm = val.substring(start, end).trim().toUpperCase();
+
+        if (currentTerm.length < 1) {
+            suggestionsBox.classList.add('hidden');
+            return;
+        }
+
+        // Filtrar
+        const matches = aircraftList.filter(ac => 
+            ac.icao.startsWith(currentTerm) || ac.name.toUpperCase().includes(currentTerm)
+        ).slice(0, 10); // Limite de 10 sugestões
+
+        if (matches.length > 0) {
+            suggestionsBox.innerHTML = matches.map(ac => `
+                <div class="p-2 hover:bg-blue-50 cursor-pointer text-sm border-b last:border-0" 
+                     onclick="selectAircraft('${ac.icao}', ${start}, ${end})">
+                    <span class="font-bold text-blue-800">${ac.icao}</span> 
+                    <span class="text-gray-500 text-xs">- ${ac.name}</span>
+                </div>
+            `).join('');
+            suggestionsBox.classList.remove('hidden');
+        } else {
+            suggestionsBox.classList.add('hidden');
+        }
+    });
+
+    // Fechar ao clicar fora
+    document.addEventListener('click', function(e) {
+        if (!input.contains(e.target) && !suggestionsBox.contains(e.target)) {
+            suggestionsBox.classList.add('hidden');
+        }
+    });
+
+    // Função global para ser chamada pelo onclick do HTML gerado
+    window.selectAircraft = function(icao, start, end) {
+        const val = input.value;
+        const before = val.substring(0, start);
+        const after = val.substring(end);
+        
+        // Adiciona espaço após a vírgula se necessário
+        const prefix = before.trimEnd(); 
+        const suffix = after;
+        
+        input.value = prefix + (prefix.endsWith(',') || prefix === '' ? '' : ', ') + icao + suffix;
+        suggestionsBox.classList.add('hidden');
+        input.focus();
+    };
+});
+</script>
+
 </body>
 </html>

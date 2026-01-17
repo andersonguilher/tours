@@ -112,9 +112,12 @@ $rules = json_decode($tour['rules_json'], true);
             <div class="bg-yellow-50 p-6 rounded-xl border border-yellow-200">
                 <h3 class="text-lg font-bold text-yellow-800 border-b border-yellow-200 pb-2 mb-4">3. Regras</h3>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div>
+                    <div class="relative group-autocomplete">
                         <label class="label-admin text-yellow-800">Aeronaves</label>
-                        <input type="text" name="rules[allowed_aircraft]" value="<?php echo $rules['allowed_aircraft'] ?? ''; ?>" class="input-admin border-yellow-300">
+                        <input type="text" id="aircraftInput" name="rules[allowed_aircraft]" value="<?php echo $rules['allowed_aircraft'] ?? ''; ?>" class="input-admin border-yellow-300" autocomplete="off">
+                        <div id="aircraftSuggestions" class="hidden absolute z-50 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto mt-1">
+                            </div>
+                        <p class="text-[10px] text-yellow-600 mt-1">Separe por vírgula. Base SimBrief.</p>
                     </div>
                     <div>
                         <label class="label-admin text-yellow-800">Velocidade Máx. (< FL100)</label>
@@ -144,5 +147,75 @@ $rules = json_decode($tour['rules_json'], true);
     .input-admin { width: 100%; border: 1px solid #cbd5e1; border-radius: 0.5rem; padding: 0.75rem; outline: none; transition: all 0.2s; }
     .input-admin:focus { ring: 2px; border-color: #ca8a04; }
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const input = document.getElementById('aircraftInput');
+    const suggestionsBox = document.getElementById('aircraftSuggestions');
+    let aircraftList = [];
+
+    // Carregar lista de aeronaves do backend
+    fetch('ajax_simbrief_aircraft.php')
+        .then(response => response.json())
+        .then(data => {
+            aircraftList = data; 
+        })
+        .catch(err => console.error('Erro ao carregar aeronaves:', err));
+
+    input.addEventListener('input', function(e) {
+        const val = this.value;
+        const cursorPosition = this.selectionStart;
+        
+        const lastComma = val.lastIndexOf(',', cursorPosition - 1);
+        const nextComma = val.indexOf(',', cursorPosition);
+        const start = lastComma + 1;
+        const end = nextComma === -1 ? val.length : nextComma;
+        
+        const currentTerm = val.substring(start, end).trim().toUpperCase();
+
+        if (currentTerm.length < 1) {
+            suggestionsBox.classList.add('hidden');
+            return;
+        }
+
+        const matches = aircraftList.filter(ac => 
+            ac.icao.startsWith(currentTerm) || ac.name.toUpperCase().includes(currentTerm)
+        ).slice(0, 10);
+
+        if (matches.length > 0) {
+            suggestionsBox.innerHTML = matches.map(ac => `
+                <div class="p-2 hover:bg-blue-50 cursor-pointer text-sm border-b last:border-0" 
+                     onclick="selectAircraft('${ac.icao}', ${start}, ${end})">
+                    <span class="font-bold text-gray-800">${ac.icao}</span> 
+                    <span class="text-gray-500 text-xs">- ${ac.name}</span>
+                </div>
+            `).join('');
+            suggestionsBox.classList.remove('hidden');
+        } else {
+            suggestionsBox.classList.add('hidden');
+        }
+    });
+
+    document.addEventListener('click', function(e) {
+        if (!input.contains(e.target) && !suggestionsBox.contains(e.target)) {
+            suggestionsBox.classList.add('hidden');
+        }
+    });
+
+    window.selectAircraft = function(icao, start, end) {
+        const val = input.value;
+        const before = val.substring(0, start);
+        const after = val.substring(end);
+        
+        const prefix = before.trimEnd(); 
+        const suffix = after;
+        
+        input.value = prefix + (prefix.endsWith(',') || prefix === '' ? '' : ', ') + icao + suffix;
+        suggestionsBox.classList.add('hidden');
+        input.focus();
+    };
+});
+</script>
+
 </body>
 </html>

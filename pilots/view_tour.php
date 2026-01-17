@@ -111,7 +111,6 @@ if (!$tour) die("Tour não encontrado.");
 
 // Helpers
 function getMetar($icao) {
-    // Fallback se não tiver SimBrief data
     if (function_exists('curl_init')) {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, "https://metar.vatsim.net/metar.php?id=" . $icao);
@@ -211,7 +210,7 @@ foreach($allLegs as $leg) {
     }
 }
 $jsMapSegments = json_encode($mapSegments);
-$jsRealRoute = json_encode($realRoutePoints); // Passa a rota real para o JS
+$jsRealRoute = json_encode($realRoutePoints);
 $rules = json_decode($tour['rules_json'], true);
 ?>
 
@@ -242,17 +241,8 @@ $rules = json_decode($tour['rules_json'], true);
         @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
         .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
 
-        /* Remove o estilo padrão branco quadrado do Leaflet */
-        .leaflet-tooltip {
-            background: transparent !important;
-            border: none !important;
-            box-shadow: none !important;
-            color: white !important;
-        }
-        /* Seta do tooltip */
-        .leaflet-tooltip-top:before {
-            border-top-color: rgba(15, 23, 42, 0.9) !important; /* Cor do slate-900 */
-        }        
+        .leaflet-tooltip { background: transparent !important; border: none !important; box-shadow: none !important; color: white !important; }
+        .leaflet-tooltip-top:before { border-top-color: rgba(15, 23, 42, 0.9) !important; }
     </style>
 </head>
 <body class="bg-slate-950 text-white h-screen flex flex-col font-sans overflow-hidden">
@@ -370,9 +360,53 @@ $rules = json_decode($tour['rules_json'], true);
             </div>
         </div>
     </div>
-    <?php endif; ?>
+<?php endif; ?>
 
-    <div class="h-16 bg-slate-900 border-b border-slate-800 flex justify-between items-center px-6 z-50 shrink-0 shadow-lg">
+<div id="dispatch-modal" class="hidden fixed inset-0 z-[9990] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl max-w-md w-full overflow-hidden transform transition-all">
+        <div class="bg-slate-800 px-6 py-4 flex justify-between items-center border-b border-slate-700">
+            <h3 class="text-lg font-bold text-white flex items-center gap-2"><i class="fa-solid fa-plane-circle-check text-blue-500"></i> Planejamento de Voo</h3>
+            <button onclick="closeDispatchModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-times"></i></button>
+        </div>
+        
+        <div class="p-6 space-y-4">
+            <div class="flex items-center justify-between bg-slate-950 p-4 rounded-lg border border-slate-800">
+                <div class="text-center">
+                    <span class="block text-[10px] text-slate-500 font-bold mb-1">ORIGEM</span>
+                    <span id="modal-dep" class="text-2xl font-black text-white">---</span>
+                </div>
+                <i class="fa-solid fa-arrow-right text-slate-600"></i>
+                <div class="text-center">
+                    <span class="block text-[10px] text-slate-500 font-bold mb-1">DESTINO</span>
+                    <span id="modal-arr" class="text-2xl font-black text-white">---</span>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-400 mb-2 uppercase">Aeronave</label>
+                <div id="aircraft-selection-container">
+                    </div>
+                <p class="text-[10px] text-slate-600 mt-1">Selecione conforme disponibilidade da frota.</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Pista Saída (Opcional)</label>
+                    <input type="text" id="modal-rwy-out" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-center font-mono uppercase focus:border-blue-500 outline-none" placeholder="AUTO">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Pista Chegada (Opcional)</label>
+                    <input type="text" id="modal-rwy-in" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-center font-mono uppercase focus:border-blue-500 outline-none" placeholder="AUTO">
+                </div>
+            </div>
+
+            <button onclick="confirmDispatch()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded shadow-lg transition flex items-center justify-center gap-2 mt-2">
+                <i class="fa-solid fa-bolt"></i> GERAR OFP NO SIMBRIEF
+            </button>
+        </div>
+    </div>
+</div>
+<div class="h-16 bg-slate-900 border-b border-slate-800 flex justify-between items-center px-6 z-50 shrink-0 shadow-lg">
         <div class="flex items-center gap-4">
             <a href="index.php" class="text-slate-400 hover:text-white transition text-sm flex items-center gap-2 group">
                 <i class="fa-solid fa-arrow-left group-hover:-translate-x-1 transition"></i> <span class="hidden md:inline">Sair do Despacho</span>
@@ -494,7 +528,7 @@ $rules = json_decode($tour['rules_json'], true);
                                 </div>
 
                                 <div class="grid grid-cols-2 gap-2">
-                                    <button onclick="generateOFP('<?php echo $leg['dep_icao']; ?>', '<?php echo $leg['arr_icao']; ?>', '<?php echo $leg['route_string']; ?>', '<?php echo $rules['allowed_aircraft'] ?? ''; ?>')" 
+                                    <button onclick="openDispatchModal('<?php echo $leg['dep_icao']; ?>', '<?php echo $leg['arr_icao']; ?>', '<?php echo $leg['route_string']; ?>', '<?php echo $rules['allowed_aircraft'] ?? ''; ?>')" 
                                             class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 rounded text-center shadow transition flex items-center justify-center gap-1 w-full btn-glow">
                                         <i class="fa-solid fa-cloud-bolt"></i> Gerar OFP (API)
                                     </button>
@@ -513,7 +547,7 @@ $rules = json_decode($tour['rules_json'], true);
                                 <div class="text-center">
                                      <button onclick="requestManualValidation(<?php echo $leg['id']; ?>, '<?php echo $leg['dep_icao']; ?>', '<?php echo $leg['arr_icao']; ?>')" class="text-[9px] text-slate-500 hover:text-white underline decoration-dotted transition">
                                         Reportar Problema / Validar Manualmente
-                                    </button>
+                                     </button>
                                 </div>
                             </div>
                         <?php endif; ?>
@@ -560,7 +594,7 @@ $rules = json_decode($tour['rules_json'], true);
         <input type="text" name="dest">
         <input type="text" name="route">
         <input type="text" name="type">
-        <input type="text" name="airline" value="<?php echo $simbrief_airline; ?>">
+        <input type="text" name="origrwy"> <input type="text" name="destrwy"> <input type="text" name="airline" value="<?php echo $simbrief_airline; ?>">
         <input type="text" name="fltnum" value="<?php echo $simbrief_number; ?>">
         <input type="text" name="units" value="KGS"> 
         <input type="text" name="navlog" value="1">
@@ -569,25 +603,80 @@ $rules = json_decode($tour['rules_json'], true);
     </form>
 
     <script src="../scripts/simbrief.apiv1.js"></script>
+    
     <script>
         var api_dir = '../includes/';
 
-        function generateOFP(dep, arr, route, acft) {
-            let aircraftType = acft.split(',')[0].trim();
-            if(!aircraftType || aircraftType === "Livre") aircraftType = "B738";
+        // Variáveis globais para armazenar dados do voo enquanto o modal está aberto
+        let currentFlightData = {};
 
-            document.getElementsByName('orig')[0].value = dep;
-            document.getElementsByName('dest')[0].value = arr;
-            document.getElementsByName('route')[0].value = route;
+        function openDispatchModal(dep, arr, route, acftString) {
+            // Salvar dados
+            currentFlightData = { dep, arr, route };
+
+            // Popular UI do Modal
+            document.getElementById('modal-dep').innerText = dep;
+            document.getElementById('modal-arr').innerText = arr;
+
+            // Popular dropdown de aeronaves
+            const container = document.getElementById('aircraft-selection-container');
+            container.innerHTML = '';
+
+            let aircraftArray = [];
+            if (acftString && acftString.trim() !== '' && acftString !== 'Livre') {
+                aircraftArray = acftString.split(',').map(s => s.trim().toUpperCase()).filter(s => s !== '');
+            }
+
+            if (aircraftArray.length > 0) {
+                let selectHTML = `<select id="modal-acft-select" class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-blue-500">`;
+                aircraftArray.forEach(ac => {
+                    selectHTML += `<option value="${ac}">${ac}</option>`;
+                });
+                selectHTML += `</select>`;
+                container.innerHTML = selectHTML;
+            } else {
+                container.innerHTML = `<input type="text" id="modal-acft-select" class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-blue-500 uppercase" placeholder="Ex: B738" value="B738">`;
+            }
+
+            // Resetar campos de pista
+            document.getElementById('modal-rwy-out').value = '';
+            document.getElementById('modal-rwy-in').value = '';
+
+            // Mostrar Modal
+            document.getElementById('dispatch-modal').classList.remove('hidden');
+        }
+
+        function closeDispatchModal() {
+            document.getElementById('dispatch-modal').classList.add('hidden');
+        }
+
+        function confirmDispatch() {
+            // Pega valores do modal
+            const acftInput = document.getElementById('modal-acft-select');
+            const aircraftType = acftInput.value || "B738";
+            const rwyOut = document.getElementById('modal-rwy-out').value;
+            const rwyIn = document.getElementById('modal-rwy-in').value;
+
+            // Preenche o form oculto do SimBrief
+            document.getElementsByName('orig')[0].value = currentFlightData.dep;
+            document.getElementsByName('dest')[0].value = currentFlightData.arr;
+            document.getElementsByName('route')[0].value = currentFlightData.route;
             document.getElementsByName('type')[0].value = aircraftType;
             
+            // Novos campos de pista
+            document.getElementsByName('origrwy')[0].value = rwyOut;
+            document.getElementsByName('destrwy')[0].value = rwyIn;
+            
+            // Envia
+            closeDispatchModal();
             simbriefsubmit(window.location.href);
         }
     </script>
 
     <script>
+        // --- CÓDIGO DO MAPA (Mantido original do seu snippet) ---
         const segments = <?php echo $jsMapSegments; ?>;
-        const realRoute = <?php echo $jsRealRoute; ?>; // Pontos da rota real
+        const realRoute = <?php echo $jsRealRoute; ?>; 
         
         var map = L.map('map', {zoomControl: false, scrollWheelZoom: true, attributionControl: false});
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 18 }).addTo(map);
@@ -616,10 +705,7 @@ $rules = json_decode($tour['rules_json'], true);
 
         var bounds = L.latLngBounds();
         
-        // 1. Desenha os segmentos do Tour (Linhas curvas entre aeroportos)
         if (segments.length > 0) {
-            
-            // Verifica se temos uma rota real carregada para esta sessão
             const hasRealRoute = (typeof realRoute !== 'undefined' && realRoute.length > 0);
 
             segments.forEach(seg => {
@@ -629,15 +715,10 @@ $rules = json_decode($tour['rules_json'], true);
                 if (seg.status === 'active') { color = '#fbbf24'; weight = 3; opacity = 1; dash = '8, 8'; } 
                 else if (seg.status === 'completed') { color = '#10b981'; weight = 3; opacity = 1; dash = null; }
 
-                // --- LÓGICA DE OCULTAÇÃO DA LINHA AMARELA ---
-                // Se temos a Rota Real (SimBrief) E esta é a perna ativa, NÃO desenhamos a linha curva amarela.
-                // Desenhamos a linha apenas se: (Não tem rota real) OU (A perna não é a ativa)
                 if (!hasRealRoute || seg.status !== 'active') {
                     L.polyline(curvePoints, {color: color, weight: weight, opacity: opacity, dashArray: dash}).addTo(map);
                 }
 
-                // --- MARCADORES DOS AEROPORTOS (Sempre desenha) ---
-                // Mantemos os pontos de origem/destino mesmo se a linha sumir, para mostrar as bandeiras e infos
                 const createTooltip = (point) => {
                     let html = "<div class='tooltip-content'>";
                     if(point.flag) html += `<img src='${point.flag}' class='w-6 h-4 mb-1 mx-auto rounded shadow-sm block'>`;
@@ -653,60 +734,51 @@ $rules = json_decode($tour['rules_json'], true);
                 L.circleMarker([seg.end.lat, seg.end.lon], {radius: 3, color: '#fff', fillColor: '#3b82f6', fillOpacity: 1})
                  .bindTooltip(createTooltip(seg.end), {className: 'custom-tooltip', direction: 'top', offset: [0, -5]}).addTo(map);
                 
-                // Se não tiver rota real, o mapa foca baseado nessas curvas
                 if (!hasRealRoute) {
                     bounds.extend(curvePoints);
                 }
             });
         }
 
-        // 2. Desenha a ROTA REAL IMPORTADA (Estilo Radar Moderno)
         if (typeof realRoute !== 'undefined' && realRoute.length > 0) {
-            
             var routeLatLons = realRoute.map(p => [p.lat, p.lng]);
             
-            // A) Efeito "Glow" (Sombra colorida larga e transparente)
             L.polyline(routeLatLons, {
-                color: '#f472b6', // Rosa claro
-                weight: 10,       // Largura maior
-                opacity: 0.2,     // Bem transparente
+                color: '#f472b6', 
+                weight: 10,       
+                opacity: 0.2,     
                 lineCap: 'round'
             }).addTo(map);
 
-            // B) Linha Principal (Núcleo fino e sólido)
             var polyline = L.polyline(routeLatLons, {
-                color: '#ec4899', // Rosa Pink vibrante
+                color: '#ec4899', 
                 weight: 3,
                 opacity: 1,
-                dashArray: null   // Linha sólida
+                dashArray: null   
             }).addTo(map);
 
-            // C) Adicionar pontos nos Waypoints (Fixos)
             realRoute.forEach((point, index) => {
-                // Pula o primeiro e último (já são os aeroportos) para não poluir
                 if (index === 0 || index === realRoute.length - 1) return;
 
                 L.circleMarker([point.lat, point.lng], {
-                    radius: 3,              // Ponto pequeno
-                    color: 'transparent',   // Sem borda
-                    fillColor: '#fff',      // Miolo branco
+                    radius: 3,              
+                    color: 'transparent',   
+                    fillColor: '#fff',      
                     fillOpacity: 0.8        
                 }).bindTooltip(
                     `<div class="font-bold text-xs text-pink-400 font-mono tracking-widest">${point.name}</div>`, 
                     {
-                        permanent: false,   // Só aparece ao passar o mouse
+                        permanent: false,   
                         direction: 'top',
-                        className: 'bg-slate-900 border border-pink-500/30 px-2 py-1 rounded shadow-xl' // Tailwind classes
+                        className: 'bg-slate-900 border border-pink-500/30 px-2 py-1 rounded shadow-xl' 
                     }
                 ).addTo(map);
             });
             
-            // D) Ajusta o zoom para focar na rota real com margem confortável
             var realBounds = L.latLngBounds(routeLatLons);
             map.fitBounds(realBounds, {paddingTopLeft: [50, 50], paddingBottomRight: [50, 50]});
 
         } else if (segments.length > 0) {
-             // Fallback para rota padrão se não houver SimBrief
              map.fitBounds(bounds, {padding: [80, 80]});
         } else {
             map.setView([20, -40], 3); 
