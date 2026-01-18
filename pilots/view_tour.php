@@ -344,7 +344,7 @@ $rules = json_decode($tour['rules_json'], true);
                         Fechar Janela
                     </button>
                     
-                    <a href="<?php echo $ofpData['files']['pdf']['link']; ?>" target="_blank" class="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-6 rounded transition shadow-lg hover:shadow-red-900/20">
+                    <a href="<?php echo $ofpData['files']['directory'] . $ofpData['files']['pdf']['link']; ?>" href="<?php echo $ofpData['files']['pdf']['link']; ?>" target="_blank" class="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-6 rounded transition shadow-lg hover:shadow-red-900/20">
                         <i class="fa-solid fa-file-pdf"></i> PDF Oficial
                     </a>
                     
