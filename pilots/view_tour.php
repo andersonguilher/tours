@@ -1,6 +1,6 @@
 <?php
 // pilots/view_tour.php
-// CENTRAL DE OPERAÇÕES DE TOUR: Mapa + Despacho + SimBrief API v1 Full Features
+// CENTRAL DE OPERAÇÕES DE TOUR: Mapa + Despacho + SimBrief API v1 + FL & SIDs/STARs Toggle
 
 // --- 1. CARREGAMENTO ROBUSTO DO WORDPRESS ---
 $possiblePaths = [
@@ -243,6 +243,9 @@ $rules = json_decode($tour['rules_json'], true);
 
         .leaflet-tooltip { background: transparent !important; border: none !important; box-shadow: none !important; color: white !important; }
         .leaflet-tooltip-top:before { border-top-color: rgba(15, 23, 42, 0.9) !important; }
+
+        /* LOADING OVERLAY STYLES */
+        #loading-overlay { z-index: 10000; background: rgba(15, 23, 42, 0.95); }
     </style>
 </head>
 <body class="bg-slate-950 text-white h-screen flex flex-col font-sans overflow-hidden">
@@ -269,7 +272,7 @@ $rules = json_decode($tour['rules_json'], true);
             
             <div class="p-6 overflow-y-auto custom-scrollbar">
                 
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
                     <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
                         <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1"><i class="fa-solid fa-gas-pump"></i> Block Fuel</div>
                         <div class="text-2xl font-mono font-bold text-green-400"><?php echo $ofpData['fuel']['plan_ramp']; ?> <span class="text-xs text-slate-500">KG</span></div>
@@ -277,6 +280,15 @@ $rules = json_decode($tour['rules_json'], true);
                     <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
                         <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1"><i class="fa-solid fa-stopwatch"></i> Trip Time</div>
                         <div class="text-2xl font-mono font-bold text-blue-400"><?php echo gmdate("H:i", $ofpData['times']['est_time_enroute']); ?></div>
+                    </div>
+                    <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+                        <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1"><i class="fa-solid fa-arrow-up-right-dots"></i> Cruise Alt</div>
+                        <div class="text-2xl font-mono font-bold text-purple-400">
+                            <?php 
+                            $alt = $ofpData['general']['initial_altitude']; 
+                            echo (is_numeric($alt) && $alt > 1000) ? 'FL' . round($alt/100) : $alt; 
+                            ?>
+                        </div>
                     </div>
                     <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
                         <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1"><i class="fa-solid fa-weight-hanging"></i> Est. ZFW</div>
@@ -362,6 +374,18 @@ $rules = json_decode($tour['rules_json'], true);
     </div>
 <?php endif; ?>
 
+<div id="sb-iframe-modal" class="hidden fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden relative">
+         <div class="bg-slate-800 border-b border-slate-700 p-2 flex justify-between items-center">
+            <span class="text-xs text-slate-400 font-bold uppercase ml-2"><i class="fa-solid fa-bolt text-blue-500"></i> SimBrief Dispatch</span>
+            <button onclick="closeSBModal()" class="bg-red-600 hover:bg-red-500 text-white w-6 h-6 rounded flex items-center justify-center shadow transition">
+                <i class="fa-solid fa-times text-xs"></i>
+            </button>
+         </div>
+        <iframe name="sb_iframe" id="sb_iframe" class="w-full h-full border-none bg-white" src="about:blank"></iframe>
+    </div>
+</div>
+
 <div id="dispatch-modal" class="hidden fixed inset-0 z-[9990] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
     <div class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl max-w-md w-full overflow-hidden transform transition-all">
         <div class="bg-slate-800 px-6 py-4 flex justify-between items-center border-b border-slate-700">
@@ -399,6 +423,20 @@ $rules = json_decode($tour['rules_json'], true);
                     <input type="text" id="modal-rwy-in" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-center font-mono uppercase focus:border-blue-500 outline-none" placeholder="AUTO">
                 </div>
             </div>
+            
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                     <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Altitude / FL</label>
+                     <input type="text" id="modal-fl" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-center font-mono uppercase focus:border-blue-500 outline-none" placeholder="AUTO">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">SIDs & STARs</label>
+                    <select id="modal-sidstar" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-center font-mono uppercase focus:border-blue-500 outline-none">
+                        <option value="1" selected>Sim (Incluir)</option>
+                        <option value="0">Não (Rota Pura)</option>
+                    </select>
+                </div>
+            </div>
 
             <button onclick="confirmDispatch()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded shadow-lg transition flex items-center justify-center gap-2 mt-2">
                 <i class="fa-solid fa-bolt"></i> GERAR OFP NO SIMBRIEF
@@ -406,6 +444,13 @@ $rules = json_decode($tour['rules_json'], true);
         </div>
     </div>
 </div>
+
+<div id="loading-overlay" class="hidden fixed inset-0 flex flex-col items-center justify-center text-white backdrop-blur-md">
+    <div class="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+    <div class="text-xl font-bold animate-pulse">Processando OFP...</div>
+    <div class="text-sm text-slate-400 mt-2">Recebendo dados do SimBrief. Aguarde.</div>
+</div>
+
 <div class="h-16 bg-slate-900 border-b border-slate-800 flex justify-between items-center px-6 z-50 shrink-0 shadow-lg">
         <div class="flex items-center gap-4">
             <a href="index.php" class="text-slate-400 hover:text-white transition text-sm flex items-center gap-2 group">
@@ -594,7 +639,9 @@ $rules = json_decode($tour['rules_json'], true);
         <input type="text" name="dest">
         <input type="text" name="route">
         <input type="text" name="type">
-        <input type="text" name="origrwy"> <input type="text" name="destrwy"> <input type="text" name="airline" value="<?php echo $simbrief_airline; ?>">
+        <input type="text" name="origrwy"> <input type="text" name="destrwy">
+        <input type="text" name="fl">
+        <input type="text" name="sidstar" value="1"> <input type="text" name="airline" value="<?php echo $simbrief_airline; ?>">
         <input type="text" name="fltnum" value="<?php echo $simbrief_number; ?>">
         <input type="text" name="units" value="KGS"> 
         <input type="text" name="navlog" value="1">
@@ -602,7 +649,7 @@ $rules = json_decode($tour['rules_json'], true);
         <input type="text" name="cpt" value="<?php echo $current_user->display_name; ?>">
     </form>
 
-    <script src="../scripts/simbrief.apiv1.js"></script>
+    <script src="../scripts/simbrief.apiv1.js?v=<?php echo time(); ?>"></script>
     
     <script>
         var api_dir = '../includes/';
@@ -638,9 +685,11 @@ $rules = json_decode($tour['rules_json'], true);
                 container.innerHTML = `<input type="text" id="modal-acft-select" class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-blue-500 uppercase" placeholder="Ex: B738" value="B738">`;
             }
 
-            // Resetar campos de pista
+            // Resetar campos de pista e FL
             document.getElementById('modal-rwy-out').value = '';
             document.getElementById('modal-rwy-in').value = '';
+            document.getElementById('modal-fl').value = '';
+            document.getElementById('modal-sidstar').value = '1';
 
             // Mostrar Modal
             document.getElementById('dispatch-modal').classList.remove('hidden');
@@ -656,6 +705,8 @@ $rules = json_decode($tour['rules_json'], true);
             const aircraftType = acftInput.value || "B738";
             const rwyOut = document.getElementById('modal-rwy-out').value;
             const rwyIn = document.getElementById('modal-rwy-in').value;
+            const fl = document.getElementById('modal-fl').value;
+            const sidstar = document.getElementById('modal-sidstar').value; // NEW SIDSTAR VALUE
 
             // Preenche o form oculto do SimBrief
             document.getElementsByName('orig')[0].value = currentFlightData.dep;
@@ -663,13 +714,27 @@ $rules = json_decode($tour['rules_json'], true);
             document.getElementsByName('route')[0].value = currentFlightData.route;
             document.getElementsByName('type')[0].value = aircraftType;
             
-            // Novos campos de pista
+            // Novos campos
             document.getElementsByName('origrwy')[0].value = rwyOut;
             document.getElementsByName('destrwy')[0].value = rwyIn;
+            document.getElementsByName('fl')[0].value = fl;
+            document.getElementsByName('sidstar')[0].value = sidstar; // ASSIGN NEW VALUE
             
             // Envia
             closeDispatchModal();
             simbriefsubmit(window.location.href);
+        }
+
+        function closeSBModal() {
+            document.getElementById('sb-iframe-modal').classList.add('hidden');
+            document.getElementById('sb_iframe').src = 'about:blank';
+            if(typeof SBloop !== 'undefined') window.clearInterval(SBloop);
+        }
+        
+        // NOVA FUNÇÃO: CHAMADA PELO SCRIPT JS QUANDO TERMINA
+        function showLoadingScreen() {
+            document.getElementById('sb-iframe-modal').classList.add('hidden'); // Fecha o modal SimBrief visualmente
+            document.getElementById('loading-overlay').classList.remove('hidden'); // Mostra a tela de espera
         }
     </script>
 
