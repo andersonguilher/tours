@@ -1,123 +1,252 @@
-# ✈️ Kafly Tours System
+# ✈️ Tours & Events Management System for Virtual Airlines
 
-Sistema completo de gestão de **Tours e Eventos** para **Companhias Aéreas Virtuais (VA)**, com validação automática de voos (**IVAO/VATSIM**), gamificação e emissão de certificados.
+Plataforma **avançada e extensível** para gerenciamento completo de **Tours, Eventos e Progressão de Pilotos** em **Companhias Aéreas Virtuais (Virtual Airlines – VA)**.  
+O sistema foi projetado para **automatizar processos operacionais**, aumentar o **engajamento dos pilotos** e fornecer ao staff **controle total** sobre eventos, validações e recompensas.
 
-![Status](https://img.shields.io/badge/Status-Active-success)
-![Version](https://img.shields.io/badge/Version-1.2.0-blue)
-![Tech](https://img.shields.io/badge/PHP-7.4%2B-purple)
+> 🚀 Ideal para VAs que desejam profissionalizar seus tours, reduzir validações manuais e oferecer uma experiência moderna aos pilotos.
 
 ---
 
-## 📋 Funcionalidades
+## 📖 Índice
+
+- [Visão Geral](#-visão-geral)
+- [Principais Diferenciais](#-principais-diferenciais)
+- [Funcionalidades](#-funcionalidades)
+  - [Pilotos](#para-pilotos)
+  - [Administração](#painel-administrativo)
+- [Tecnologias Utilizadas](#-tecnologias-utilizadas)
+- [Requisitos](#-requisitos-do-sistema)
+- [Instalação e Configuração](#-instalação-e-configuração)
+- [SimBrief API](#-integração-com-simbrief)
+- [Automação e Validação](#-automação-e-validação-de-voos)
+- [Estrutura do Projeto](#-estrutura-do-projeto)
+- [Boas Práticas de Segurança](#-boas-práticas-de-segurança)
+- [Contribuição](#-contribuição)
+- [Licença](#-licença)
+
+---
+
+## 📌 Visão Geral
+
+O **Tours & Events Management System** é um sistema modular desenvolvido em **PHP**, focado em VAs que realizam **tours estruturados**, **eventos especiais** e **campanhas de engajamento**.
+
+Ele centraliza:
+- Validação automática de voos
+- Progressão de carreira dos pilotos
+- Emissão de certificados e badges
+- Integração com SimBrief
+- Rankings e estatísticas
+
+Tudo isso reduzindo a necessidade de validações manuais e aumentando a confiabilidade dos dados.
+
+---
+
+## 🌟 Principais Diferenciais
+
+- ✅ **Validação automática de voos baseada em dados reais**
+- 🔄 **Integração nativa com SimBrief**
+- 🏅 **Sistema completo de ranks, badges e progressão**
+- 📘 **Passaporte digital visual**
+- 📄 **Certificados em PDF gerados automaticamente**
+- 📊 **Rankings e estatísticas em tempo real**
+- 🔐 **Configuração segura fora do repositório**
+- ⚙️ **Estrutura modular e extensível**
+
+---
+
+## 🚀 Funcionalidades
 
 ### 👨‍✈️ Para Pilotos
-- **Dashboard Interativo:** Visualização de Tours ativos, datas de vigência e progresso.
-- **Mapas em Tempo Real:** Visualização da rota com **LeafletJS**, mostrando pernas voadas, ativas e pendentes.
-- **Flight Tools:** Integração direta com **SimBrief** (geração de OFP) e METAR em tempo real.
-- **Gamificação (Passaporte):** Perfil de conquistas com medalhas (*Badges*) e estatísticas de voo.
-- **Certificados Automáticos:** Geração de certificados em PDF com assinaturas digitais e hash de validação ao completar um Tour.
 
-### 👮‍♂️ Para Staff (Admin)
-- **Gestão de Tours:** Criação e edição de eventos, definição de datas, banners e regras (Aeronaves, Velocidade, Rede).
-- **Gestão de Rotas:** Interface para adicionar/remover pernas (*Legs*) com sugestão inteligente de ICAO.
-- **Central de Medalhas:** Upload e gestão de *Badges* para o passaporte.
-- **Segurança:** Painel protegido com verificação de permissões do WordPress (`current_user_can`).
+- **Tours Estruturados**
+  - Visualização de tours ativos, encerrados e futuros
+  - Detalhes completos de cada perna (leg)
 
-### 🤖 Automação (Backend)
-- **Tracker Automático:** Script via **Cron Job** que monitoriza a rede (*Whazzup JSON*) a cada 2 minutos.
-- **Validação Rigorosa:** Verificação de Callsign, Aeronave, Rota e Status (*Landed / On Blocks*).
-- **Landing Rate:** Registo da suavidade do toque (*fpm*) no histórico.
-- **Discord Webhooks:** Notificações automáticas no Discord ao completar uma perna ou finalizar um Tour.
+- **Planejamento com SimBrief**
+  - Integração direta via API v1
+  - Validação baseada no OFP real do piloto
+
+- **Live Board**
+  - Acompanhamento de voos em tempo real
+  - Status e progresso do piloto
+
+- **Passaporte Digital**
+  - Histórico visual de tours concluídos
+  - Selos e conquistas exibidos graficamente  
+  Arquivo: `passport_book.php`
+
+- **Sistema de Ranks**
+  - Progressão automática baseada em critérios configuráveis
+  - Acúmulo de pontos e experiência
+
+- **Certificados Automáticos**
+  - Geração de certificados personalizados em PDF
+  - Utiliza biblioteca `FPDF`
+  - Emitidos automaticamente ao concluir um tour
+
+- **Rankings**
+  - Classificação geral e por tour
+  - Incentivo à competitividade saudável
 
 ---
 
-## 🚀 Instalação
+### 🛠️ Painel Administrativo
 
-### 1. Requisitos
-- PHP **7.4 ou superior** (com **cURL** e **PDO** ativados).
-- MySQL / MariaDB.
-- WordPress (para autenticação de utilizadores).
-- Acesso ao **Crontab** (para o tracker).
+- **Gerenciamento de Tours**
+  - Criar, editar, publicar e finalizar tours
+  - Definir regras, datas e critérios
 
-### 2. Estrutura de Pastas
-Certifique-se de que as seguintes pastas existem e possuem permissão de escrita (`chmod 755` ou `777`):
+- **Gerenciamento de Legs**
+  - Configuração detalhada de rotas, aeronaves e requisitos
+  - Associação direta com SimBrief
 
-```text
-/dash/tours/
-├── admin/          # Painel Administrativo
-├── pilots/         # Área do Piloto (Frontend)
-├── scripts/        # Scripts de Automação (Cron)
-├── config/         # Conexão com Banco de Dados
-└── assets/
-    ├── banners/    # Imagens dos Tours
-    ├── badges/     # Imagens das Medalhas
-    └── signatures/ # Assinaturas para o Certificado
+- **Ranks e Badges**
+  - Criação de níveis personalizados
+  - Definição de badges e critérios de obtenção
+
+- **Validação Automática de Voos**
+  - Script dedicado:
+    ```
+    scripts/validate_flights.php
+    ```
+  - Pode ser executado manualmente ou via **cron**
+
+- **Gestão de Frota SimBrief**
+  - Cache inteligente de aeronaves
+  - Atualização via AJAX  
+    (`ajax_simbrief_aircraft.php`)
+
+---
+
+## 🧰 Tecnologias Utilizadas
+
+- **Backend:** PHP 7.4+
+- **Banco de Dados:** MySQL / MariaDB
+- **Integrações:** SimBrief API
+- **PDF:** FPDF
+- **Frontend:** HTML, CSS, JavaScript
+- **Arquitetura:** Modular e orientada a serviços
+
+---
+
+## 🛠️ Requisitos do Sistema
+
+- PHP 7.4 ou superior
+- MySQL ou MariaDB
+- Servidor Web: Apache ou Nginx
+- Extensões PHP:
+  - pdo
+  - pdo_mysql
+  - json
+  - gd
+  - mbstring
+
+---
+
+## 📦 Instalação e Configuração
+
+### 1️⃣ Banco de Dados
+
+Importe o schema inicial:
+
+```sql
+source tours.sql;
 ```
 
-### 3. Banco de Dados
-Importe o esquema SQL contendo as seguintes tabelas:
+---
 
-- `tours`
-- `tour_legs`
-- `pilot_tour_progress`
-- `pilot_leg_history`
-- `badges`
-- `pilot_badges`
+### 2️⃣ Arquivo de Configuração (Segurança)
 
-### 4. Configuração
-Edite o arquivo:
+O sistema **não armazena credenciais no repositório**.
+
+📍 Caminho padrão:
+```
+/var/www/kafly_user/data/www/config_db.php
+```
 
 ```php
-config/db.php
-```
+<?php
+define('DB_SERVERNAME', 'localhost');
+define('DB_VOOS_USER', 'usuario_db');
+define('DB_VOOS_PASS', 'senha_db');
+define('DB_VOOS_NAME', 'kafly_tracker');
 
-Configure:
-- Banco de dados do sistema de Tours.
-- Conexão com o banco do **WordPress / Pilotos**.
+define('SIMBRIEF_API_KEY', 'SUA_API_KEY');
+?>
+```
 
 ---
 
-## ⚙️ Configuração do Tracker
-
-Configure uma **Cron Job** para rodar a cada **2 ou 5 minutos**:
+### 3️⃣ Permissões
 
 ```bash
-*/2 * * * * /usr/bin/php /caminho/completo/para/dash/tours/scripts/validate_flights.php
-```
-
-> **Nota:**  
-> Edite o ficheiro `scripts/validate_flights.php` e adicione a sua **Webhook URL do Discord** na função `sendDiscordWebhook()`.
-
----
-
-## 📜 Certificados PDF (FPDF)
-
-O sistema utiliza a biblioteca **FPDF** para geração de certificados.
-
-1. Baixe a biblioteca em https://www.fpdf.org ou GitHub  
-2. Coloque `fpdf.php` e a pasta `font/` dentro de `/pilots/`
-3. Adicione as assinaturas (PNG transparente) em `/assets/signatures/`
-
-Arquivos esperados:
-```
-rubrica_diretor.png
-rubrica_eventos.png
+chmod -R 775 assets/banners cache
 ```
 
 ---
 
-## 🛠️ Tecnologias Utilizadas
+## 🔧 Integração com SimBrief
 
-- **Backend:** PHP (Native), MySQL
-- **Frontend:** HTML5, Tailwind CSS, JavaScript
-- **Mapas:** LeafletJS + CartoDB Dark Matter
-- **PDF:** FPDF Library
-- **Integrações:** Discord API, IVAO Whazzup API, SimBrief Dispatch
+- Necessária para:
+  - Planejamento de voo
+  - Validação automática
+- API Key deve ser privada
+- Cache evita excesso de requisições
 
 ---
 
-## 📝 Licença
+## ⏱️ Automação e Validação de Voos
 
-Este projeto foi desenvolvido para **uso exclusivo da Kafly Virtual Airline**.
+Recomendado executar via **cron**:
 
-**Desenvolvido por:** Anderson Guilherme
+```bash
+*/5 * * * * /usr/bin/php /caminho/scripts/validate_flights.php
+```
+
+---
+
+## 📂 Estrutura do Projeto
+
+```
+admin/      → Painel administrativo
+pilots/     → Área dos pilotos
+includes/   → Bibliotecas e helpers
+config/     → Configurações locais
+scripts/    → Validações e automações
+assets/     → Banners e imagens
+cache/      → Cache SimBrief
+```
+
+---
+
+## 🔐 Boas Práticas de Segurança
+
+- Credenciais fora do repositório
+- API Keys não versionadas
+- Permissões restritas de escrita
+- Scripts críticos isolados
+
+---
+
+## 🤝 Contribuição
+
+1. Fork do projeto
+2. Crie sua branch:
+   ```bash
+   git checkout -b feature/NovaFeature
+   ```
+3. Commit:
+   ```bash
+   git commit -m "Adiciona NovaFeature"
+   ```
+4. Push:
+   ```bash
+   git push origin feature/NovaFeature
+   ```
+5. Pull Request
+
+---
+
+## 📄 Licença
+
+Consulte o arquivo de licença no repositório.
