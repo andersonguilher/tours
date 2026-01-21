@@ -1,17 +1,44 @@
 <?php
 // pilots/index.php
-// DASHBOARD REDESIGN (Visual Moderno + Correção Definitiva de Rank)
+// DASHBOARD REDESIGN (Visual Moderno + Login Integrado + Layout Original Restaurado)
 
 define('BASE_PATH', dirname(__DIR__));
 
 // --- 1. CARREGAMENTO WP & SEGURANÇA ---
 $wpLoadPath = __DIR__ . '/../../../wp-load.php';
-if (file_exists($wpLoadPath)) { require_once $wpLoadPath; }
-
-if (function_exists('is_user_logged_in') && !is_user_logged_in()) {
-    wp_redirect(home_url('/login'));
-    exit;
+if (file_exists($wpLoadPath)) { 
+    require_once $wpLoadPath; 
 }
+
+// BUSCAR LOGO E INFORMAÇÕES DO TEMA ATUAL
+$logo_url = "";
+if (function_exists('has_custom_logo') && has_custom_logo()) {
+    $custom_logo_id = get_theme_mod('custom_logo');
+    $logo_data = wp_get_attachment_image_src($custom_logo_id, 'full');
+    $logo_url = $logo_data[0];
+}
+$site_name = get_bloginfo('name');
+
+$login_error = "";
+// Processa o formulário de login caso tenha sido enviado via Modal
+if (isset($_POST['login_action'])) {
+    $creds = array(
+        'user_login'    => $_POST['log'],
+        'user_password' => $_POST['pwd'],
+        'remember'      => true
+    );
+    $user = wp_signon($creds, false);
+    if (!is_wp_error($user)) {
+        header("Location: index.php"); 
+        exit;
+    } else {
+        $login_error = "Utilizador ou palavra-passe incorretos.";
+    }
+}
+
+// Verifica se está logado para decidir se mostra o modal de bloqueio
+$show_modal = (function_exists('is_user_logged_in') && !is_user_logged_in());
+
 $current_user = function_exists('wp_get_current_user') ? wp_get_current_user() : (object)['ID' => 0, 'display_name' => 'Visitante'];
 $pilot_id = $current_user->ID;
 
@@ -29,12 +56,12 @@ try {
     $host_p = defined('DB_PILOTOS_HOST') ? DB_PILOTOS_HOST : 'localhost'; 
     $user_p = defined('DB_PILOTOS_USER') ? DB_PILOTOS_USER : 'root';
     $pass_p = defined('DB_PILOTOS_PASS') ? DB_PILOTOS_PASS : '';
-    $name_p = 'u378005298_hEatD'; // Nome do banco de pilotos
+    $name_p = 'u378005298_hEatD'; 
     
     $pdoPilots = new PDO("mysql:host=$host_p;dbname=$name_p;charset=utf8mb4", $user_p, $pass_p);
     $pdoPilots->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 } catch (Exception $e) {
-    // Falha silenciosa se não conectar ao banco secundário
+    // Falha silenciosa
 }
 
 $pilotData = [
@@ -54,7 +81,7 @@ if ($pdoPilots) {
     }
 }
 
-// --- 5. STATS & RANK (LÓGICA CORRIGIDA) ---
+// --- 5. STATS & RANK ---
 $stats = ['flights' => 0, 'hours' => 0, 'last_loc' => 'SBGL'];
 $rankData = ['title' => 'Aluno', 'stripes' => 1, 'has_star' => 0];
 $progress = 0;
@@ -76,7 +103,7 @@ if (isset($pdo)) {
         $loc = $stmtLoc->fetchColumn();
         if ($loc) $stats['last_loc'] = $loc;
 
-        // Rank - PASSANDO A CONEXÃO $pdo EXPLÍCITAMENTE
+        // Rank
         if (class_exists('RankSystem')) {
             $rankData = RankSystem::getRank($totalMinutes, $pdo);
             $progress = RankSystem::getNextRankProgress($totalMinutes, $pdo);
@@ -114,11 +141,61 @@ $today = date('Y-m-d');
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0b0f19; }
         .glass-panel { background: linear-gradient(145deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95)); border: 1px solid rgba(148, 163, 184, 0.1); }
         .stripe-gradient { background: linear-gradient(90deg, #ca8a04 0%, #facc15 50%, #ca8a04 100%); }
-        /* Animação suave da barra */
         .progress-bar { transition: width 1.5s ease-in-out; }
     </style>
 </head>
 <body class="text-slate-300 min-h-screen">
+
+    <?php if ($show_modal): ?>
+    <div class="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/90 backdrop-blur-sm p-4 text-slate-300">
+        <div class="glass-panel w-full max-w-md rounded-2xl overflow-hidden shadow-2xl border border-slate-700/50">
+            <div class="h-1 bg-gradient-to-r from-blue-600 to-cyan-400"></div>
+            
+            <div class="p-8">
+                <div class="text-center mb-8">
+                    <?php if ($logo_url): ?>
+                        <img src="<?php echo $logo_url; ?>" class="max-h-20 mx-auto mb-4 drop-shadow-xl">
+                    <?php endif; ?>
+                    <h2 class="text-xl font-bold text-white uppercase tracking-tight"><?php echo $site_name; ?></h2>
+                    <p class="text-slate-400 text-xs mt-1 uppercase font-bold tracking-widest">Acesso ao Cockpit</p>
+                </div>
+
+                <?php if ($login_error): ?>
+                    <div class="mb-4 p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-500 text-xs text-center font-bold">
+                        <i class="fa-solid fa-triangle-exclamation mr-1"></i> <?php echo $login_error; ?>
+                    </div>
+                <?php endif; ?>
+
+                <form method="POST" class="space-y-5">
+                    <input type="hidden" name="login_action" value="1">
+                    <div>
+                        <label class="block text-[10px] uppercase font-bold text-slate-500 mb-1 ml-1">Utilizador</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-user absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
+                            <input type="text" name="log" required class="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 pl-11 pr-4 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all placeholder:text-slate-600" placeholder="Utilizador Kafly">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] uppercase font-bold text-slate-500 mb-1 ml-1">Senha</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
+                            <input type="password" name="pwd" required class="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 pl-11 pr-4 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all placeholder:text-slate-600" placeholder="••••••••">
+                        </div>
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2 group">
+                        ENTRAR NO SISTEMA <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
+                    </button>
+                    <div class="text-center mt-6">
+                        <a href="<?php echo home_url('/wp-login.php?action=lostpassword'); ?>" target="_blank" class="text-xs text-slate-500 hover:text-blue-400 transition underline underline-offset-4">Recuperar acesso</a>
+                    </div>
+                </form>
+            </div>
+            <div class="bg-slate-900/50 p-4 text-center border-t border-slate-800">
+                <p class="text-[10px] text-slate-600 uppercase tracking-widest font-bold">Kafly Virtual Airline Systems &copy; <?php echo date('Y'); ?></p>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <?php 
     $navPath = __DIR__ . '/../includes/navbar.php';
@@ -223,14 +300,18 @@ $today = date('Y-m-d');
                         <?php if(empty($recentFlights)): ?>
                             <div class="text-center text-slate-600 text-sm py-4 italic">Nenhum voo registrado ainda.</div>
                         <?php else: ?>
-                            <?php foreach($recentFlights as $rf): ?>
+                            <?php foreach($recentFlights as $rf): 
+                                // Fallback para colunas, caso o banco use nomes diferentes
+                                $dep = $rf['dep_icao'] ?? $rf['departure'] ?? '----';
+                                $arr = $rf['arr_icao'] ?? $rf['arrival'] ?? '----';
+                            ?>
                             <div class="flex justify-between items-center bg-slate-800/50 p-3 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition group">
                                 <div class="flex gap-3 text-sm font-mono font-bold text-blue-400 group-hover:text-blue-300">
-                                    <?php echo $rf['dep_icao']; ?> <i class="fa-solid fa-arrow-right text-slate-600 text-xs mt-1"></i> <?php echo $rf['arr_icao']; ?>
+                                    <?php echo $dep; ?> <i class="fa-solid fa-arrow-right text-slate-600 text-xs mt-1"></i> <?php echo $arr; ?>
                                 </div>
                                 <div class="text-right">
                                     <div class="text-xs text-slate-300 font-bold"><?php echo $rf['aircraft']; ?></div>
-                                    <div class="text-[10px] text-slate-500"><?php echo date('d/m/Y', strtotime($rf['date_flown'])); ?></div>
+                                    <div class="text-[10px] text-slate-500"><?php echo formatarData($rf['date_flown']); ?></div>
                                 </div>
                             </div>
                             <?php endforeach; ?>
@@ -248,8 +329,16 @@ $today = date('Y-m-d');
                     <?php else: ?>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <?php foreach($tours as $tour): 
-                                $st = $progresso[$tour['id']] ?? 'New';
-                                // Cores baseadas no status
+                                // LÓGICA DE STATUS ROBUSTA (Aceita INT 0/1/2 ou String)
+                                $rawSt = $progresso[$tour['id']] ?? 0;
+                                $statusMap = [
+                                    0 => 'New', 1 => 'In Progress', 2 => 'Completed',
+                                    '0' => 'New', '1' => 'In Progress', '2' => 'Completed',
+                                    'In Progress' => 'In Progress', 'Completed' => 'Completed'
+                                ];
+                                $st = $statusMap[$rawSt] ?? 'New';
+
+                                // Cores e Ícones
                                 $color = 'blue';
                                 $statusLabel = 'Nova';
                                 $icon = 'fa-circle-play';
@@ -257,7 +346,7 @@ $today = date('Y-m-d');
                                 if ($st == 'In Progress') { $color = 'yellow'; $statusLabel = 'Em Andamento'; $icon = 'fa-spinner fa-spin'; }
                                 if ($st == 'Completed') { $color = 'green'; $statusLabel = 'Concluída'; $icon = 'fa-check'; }
                                 
-                                $isClosed = ($tour['end_date'] && $today > $tour['end_date']);
+                                $isClosed = (!empty($tour['end_date']) && $today > $tour['end_date']);
                                 if ($isClosed && $st != 'Completed') { $color = 'red'; $statusLabel = 'Encerrada'; $icon = 'fa-lock'; }
                             ?>
                             <div class="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 hover:border-<?php echo $color; ?>-500/50 transition relative group shadow-lg flex flex-col h-full">
