@@ -22,7 +22,8 @@
 
 /**********************************************************************/
 
-$simbrief_api_key = 'CHAVE_REMOVIDA'; //Paste your API key here
+require_once(dirname(dirname(dirname(dirname(dirname(__FILE__))))) . '/config_db.php');
+$simbrief_api_key = SIMBRIEF_API_KEY;
 
 /**********************************************************************/
 
