@@ -413,6 +413,11 @@ $rules = json_decode($tour['rules_json'], true);
                 <p class="text-[10px] text-slate-600 mt-1">Selecione conforme disponibilidade da frota.</p>
             </div>
 
+            <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Rota</label>
+                <textarea id="modal-route" rows="3" class="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white font-mono text-xs focus:border-blue-500 outline-none uppercase custom-scrollbar" placeholder="Deixe em branco para auto-rota do SimBrief"></textarea>
+            </div>
+
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Pista Saída (Opcional)</label>
@@ -664,6 +669,7 @@ $rules = json_decode($tour['rules_json'], true);
             // Popular UI do Modal
             document.getElementById('modal-dep').innerText = dep;
             document.getElementById('modal-arr').innerText = arr;
+            document.getElementById('modal-route').value = route; // PRE-FILL ROUTE
 
             // Popular dropdown de aeronaves
             const container = document.getElementById('aircraft-selection-container');
@@ -711,7 +717,7 @@ $rules = json_decode($tour['rules_json'], true);
             // Preenche o form oculto do SimBrief
             document.getElementsByName('orig')[0].value = currentFlightData.dep;
             document.getElementsByName('dest')[0].value = currentFlightData.arr;
-            document.getElementsByName('route')[0].value = currentFlightData.route;
+            document.getElementsByName('route')[0].value = document.getElementById('modal-route').value; // GET FROM TEXTAREA
             document.getElementsByName('type')[0].value = aircraftType;
             
             // Novos campos
