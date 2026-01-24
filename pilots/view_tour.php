@@ -109,6 +109,17 @@ $stmt->execute([$tour_id]);
 $tour = $stmt->fetch();
 if (!$tour) die("Tour não encontrado.");
 
+// --- 5.5 SALVAR ROTA SIMBRIEF NO DB (Se gerada) ---
+if (!empty($realRoutePoints)) {
+    try {
+        $navlogJson = json_encode($realRoutePoints);
+        $updNav = $pdo->prepare("UPDATE tour_progress SET navlog_json = ? WHERE pilot_id = ? AND tour_id = ? AND status = 'In Progress'");
+        $updNav->execute([$navlogJson, $wp_user_id, $tour_id]);
+    } catch (PDOException $e) {
+        // Silently fail or log
+    }
+}
+
 // Helpers
 function getMetar($icao) {
     if (function_exists('curl_init')) {
@@ -150,6 +161,14 @@ $progress = $stmtProg->fetch();
 
 $currentLegId = $progress ? $progress['current_leg_id'] : 0;
 $tourStatus = $progress ? $progress['status'] : 'Not Started';
+
+// --- 7.5 CHECAGEM DE RASTREAMENTO AO VIVO ---
+$liveSession = null;
+if ($progress && $tourStatus == 'In Progress') {
+    $stmtLive = $pdo->prepare("SELECT * FROM tour_live_sessions WHERE pilot_id = ? AND tour_id = ? AND leg_id = ?");
+    $stmtLive->execute([$wp_user_id, $tour_id, $currentLegId]);
+    $liveSession = $stmtLive->fetch(PDO::FETCH_ASSOC);
+}
 
 $allLegs = [];
 try {
@@ -365,7 +384,10 @@ $rules = json_decode($tour['rules_json'], true);
                     <a href="<?php echo $ofpData['prefile']['vatsim']['link']; ?>" target="_blank" class="flex items-center gap-2 bg-slate-700 hover:bg-green-600 text-white font-bold py-2 px-4 rounded transition text-sm">
                         <i class="fa-solid fa-paper-plane"></i> VATSIM
                     </a>
-                     <a href="<?php echo $ofpData['prefile']['ivao']['link']; ?>" target="_blank" class="flex items-center gap-2 bg-slate-700 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded transition text-sm">
+                    <?php 
+                        $ivaoLink = !empty($ofpData['prefile']['ivao']['link']) ? $ofpData['prefile']['ivao']['link'] : 'https://fpl.ivao.aero/';
+                    ?>
+                    <a href="<?php echo $ivaoLink; ?>" target="_blank" class="flex items-center gap-2 bg-slate-700 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded transition text-sm">
                         <i class="fa-solid fa-paper-plane"></i> IVAO
                     </a>
                 </div>
@@ -531,6 +553,12 @@ $rules = json_decode($tour['rules_json'], true);
                         if ($isCurrent) {
                             $cardClass = "bg-slate-800 border border-blue-500 shadow-lg shadow-blue-900/20 relative overflow-hidden";
                             $iconStatus = "<span class='text-[9px] bg-blue-600 text-white px-2 py-0.5 rounded font-bold animate-pulse'>PRÓXIMA</span>";
+                            
+                            // Se estiver sendo rastreado, muda o status visual
+                            if ($liveSession) {
+                                $cardClass = "bg-slate-800 border border-green-500 shadow-lg shadow-green-900/20 relative overflow-hidden";
+                                $iconStatus = "<span class='text-[9px] bg-green-600 text-white px-2 py-0.5 rounded font-bold animate-pulse'><i class='fa-solid fa-satellite-dish'></i> TRACKING</span>";
+                            }
                         } elseif ($isDone) {
                             $cardClass = "bg-slate-900/50 border border-green-900/30 opacity-60";
                             $iconStatus = "<i class='fa-solid fa-check text-green-500'></i>";
@@ -576,6 +604,31 @@ $rules = json_decode($tour['rules_json'], true);
                                     <div class="mb-1"><strong class="text-white">DEP:</strong> <?php echo substr(getMetar($leg['dep_icao']), 0, 40); ?>...</div>
                                     <div><strong class="text-white">ARR:</strong> <?php echo substr(getMetar($leg['arr_icao']), 0, 40); ?>...</div>
                                 </div>
+
+                                <?php if ($liveSession): ?>
+                                    <div class="bg-green-900/20 border border-green-500/50 rounded p-3 relative overflow-hidden group">
+                                        <div class="absolute top-0 left-0 w-1 h-full bg-green-500"></div>
+                                        <div class="flex justify-between items-center mb-1">
+                                            <span class="text-green-400 font-bold text-xs uppercase tracking-wider"><i class="fa-solid fa-tower-broadcast animate-pulse"></i> Voo Detectado</span>
+                                            <span class="text-[9px] bg-green-500/20 text-green-300 px-1.5 rounded">ONLINE</span>
+                                        </div>
+                                        <div class="text-[10px] text-slate-300 grid grid-cols-2 gap-2 mt-2">
+                                            <div>
+                                                <span class="block text-slate-500">Início</span>
+                                                <span class="font-mono text-white"><?php echo date('H:i', strtotime($liveSession['start_time'])); ?>Z</span>
+                                            </div>
+                                            <div>
+                                                <span class="block text-slate-500">Validação Chegada</span>
+                                                <span class="font-mono <?php echo $liveSession['arrival_checks'] > 0 ? 'text-green-400 font-bold' : 'text-slate-400'; ?>">
+                                                    <?php echo $liveSession['arrival_checks']; ?> / 3
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="mt-2 text-[9px] text-green-500/70 italic text-center">
+                                            Voe até o destino e pare totalmente para finalizar.
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
 
                                 <div class="grid grid-cols-2 gap-2">
                                     <button onclick="openDispatchModal('<?php echo $leg['dep_icao']; ?>', '<?php echo $leg['arr_icao']; ?>', '<?php echo $leg['route_string']; ?>', '<?php echo $rules['allowed_aircraft'] ?? ''; ?>')" 

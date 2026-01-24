@@ -15,6 +15,7 @@ class FlightValidator {
     // Configurações Padrão
     private $pilotTable = 'Dados_dos_Pilotos';
     private $colIvaoId = 'ivao_id';
+    private $colVatsimId = 'vatsim_id'; // Novo suporte VATSIM
     private $colMatricula = 'matricula';
     private $colPilotId = 'id_piloto';
     
@@ -26,6 +27,48 @@ class FlightValidator {
         $this->pdoTracker = $pdoTracker;
         $this->loadSettings();
         $this->connectPilotDB();
+        $this->loadKnownPilots(); // Prefetch para performance
+    }
+
+    private function loadKnownPilots() {
+        echo "[INFO] Identificando pilotos com Tours Ativas...\n";
+        $this->knownPilots = [];
+        
+        try {
+            // 1. Busca IDs de quem está com Status 'In Progress' no sistema de Tours
+            $stmtActive = $this->pdoTracker->query("SELECT DISTINCT pilot_id FROM tour_progress WHERE status = 'In Progress'");
+            $activeIds = $stmtActive->fetchAll(PDO::FETCH_COLUMN);
+
+            if (empty($activeIds)) {
+                echo "[INFO] Nenhum piloto com tour ativa no momento.\n";
+                return;
+            }
+
+            $idsList = implode(',', array_map('intval', $activeIds));
+            
+            // 2. Busca dados apenas desses pilotos no BD externo
+            echo "[INFO] Carregando dados de rede para " . count($activeIds) . " pilotos ativos...\n";
+            
+            $sql = "SELECT *, {$this->colMatricula} as matricula FROM {$this->pilotTable} WHERE {$this->colPilotId} IN ($idsList)";
+            $stmt = $this->pdoPilots->query($sql);
+            
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                // Indexar por IVAO
+                $ivaoRaw = $row[$this->colIvaoId] ?? $row['ivao_id'] ?? null;
+                if (!empty($ivaoRaw)) {
+                    $this->knownPilots['IVAO:' . $ivaoRaw] = $row;
+                }
+                
+                // Indexar por VATSIM
+                $vatsimRaw = $row[$this->colVatsimId] ?? $row['vatsim_id'] ?? null;
+                if (!empty($vatsimRaw)) {
+                    $this->knownPilots['VATSIM:' . $vatsimRaw] = $row;
+                }
+            }
+            echo "[INFO] Cache construído: " . count($this->knownPilots) . " identidades monitoradas (Apenas Tours Ativas).\n";
+        } catch (PDOException $e) {
+            $this->log("[WARN] Erro ao carregar pilotos para memória: " . $e->getMessage());
+        }
     }
 
     private function loadSettings() {
@@ -46,6 +89,7 @@ class FlightValidator {
             $map = $this->settings['database_mappings'];
             $this->pilotTable = $map['pilots_table'] ?? $this->pilotTable;
             $this->colIvaoId = $map['columns']['ivao_id'] ?? $this->colIvaoId;
+            $this->colVatsimId = $map['columns']['vatsim_id'] ?? $this->colVatsimId;
             $this->colMatricula = $map['columns']['matricula'] ?? $this->colMatricula;
         }
     }
@@ -90,7 +134,7 @@ class FlightValidator {
                 }
             }
             
-            echo "[INFO] Processando " . count($this->pilotsOnline) . " conexões...\n";
+            echo "[INFO] Analisando tráfego global (" . count($this->pilotsOnline) . " aeronaves no radar)...\n";
         } else {
             $this->log("[WARN] Arquivo wzp.json não encontrado em: $localPath");
             return;
@@ -117,12 +161,20 @@ class FlightValidator {
         $liveCallsign = strtoupper($flight['callsign'] ?? '');
         if (!$networkId) return;
 
-        // Verifica Piloto no DB
-        $pilotData = $this->getPilotFromDB($networkId);
-        if (!$pilotData) return;
+        // VERIFICAÇÃO EM MEMÓRIA (Ultra Rápida)
+        $cacheKey = $network . ':' . $networkId;
+        if (!isset($this->knownPilots[$cacheKey])) {
+            return; // Não é piloto da companhia
+        }
+        
+        $pilotData = $this->knownPilots[$cacheKey];
 
-        $dbCallsign = strtoupper($pilotData[$this->colMatricula]);
-        if ($liveCallsign !== $dbCallsign) return;
+        // Valida Callsign
+        $dbCallsign = strtoupper($pilotData[$this->colMatricula] ?? $pilotData['matricula'] ?? '');
+        if ($liveCallsign !== $dbCallsign) {
+             // Debug Opcional: echo "Callsign mismatch: $liveCallsign vs $dbCallsign\n";
+             return;
+        }
 
         $pilotId = $pilotData['post_id'] ?? $pilotData[$this->colPilotId] ?? null;
         if (!$pilotId) return;
@@ -143,7 +195,7 @@ class FlightValidator {
             'network'        => $network
         ];
 
-        // Busca Perna Ativa
+        // Busca Perna Ativa (Esta query é leve pois só roda se o piloto for identificado)
         $activeLeg = $this->getActiveLeg($pilotId);
         if ($activeLeg) {
             echo " -> [Rastreando] {$liveCallsign} (ID: $pilotId) na perna {$activeLeg['leg_dep']} -> {$activeLeg['leg_arr']}\n";
@@ -214,9 +266,10 @@ class FlightValidator {
 
     // --- MÉTODOS DE BANCO DE DADOS (Helpers) ---
 
-    private function getPilotFromDB($networkId) {
+    private function getPilotFromDB($networkId, $network) {
+        $targetCol = ($network === 'VATSIM') ? $this->colVatsimId : $this->colIvaoId;
         try {
-            $sql = "SELECT *, {$this->colMatricula} as matricula FROM {$this->pilotTable} WHERE {$this->colIvaoId} = ? LIMIT 1";
+            $sql = "SELECT *, {$this->colMatricula} as matricula FROM {$this->pilotTable} WHERE {$targetCol} = ? LIMIT 1";
             $stmt = $this->pdoPilots->prepare($sql);
             $stmt->execute([$networkId]);
             return $stmt->fetch();
