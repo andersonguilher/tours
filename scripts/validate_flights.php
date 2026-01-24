@@ -11,6 +11,7 @@ class FlightValidator {
     private $pdoPilots;
     private $settings;
     private $pilotsOnline = [];
+    private $knownPilots = [];
     
     // Configurações Padrão
     private $pilotTable = 'Dados_dos_Pilotos';
@@ -20,8 +21,8 @@ class FlightValidator {
     private $colPilotId = 'id_piloto';
     
     // Parâmetros de Validação
-    private $arrivalChecksRequired = 3; // Quantos ciclos parado para confirmar pouso
-    private $landingSpeedThreshold = 5; // Kts (abaixo disso considera parado)
+    private $arrivalChecksRequired = 2; // Reduzido para 2 mins (antes 3)
+    private $landingSpeedThreshold = 10; // Aumentado para 10kts (antes 5)
 
     public function __construct($pdoTracker) {
         $this->pdoTracker = $pdoTracker;
@@ -114,31 +115,67 @@ class FlightValidator {
     }
 
     public function fetchNetworkData() {
-        $localPath = '/var/www/kafly_user/data/www/kafly.com.br/mapa/3d/data/wzp.json';
+        $this->pilotsOnline = [];
 
-        if (file_exists($localPath)) {
-            // Verificação de Stale Data (Arquivo velho)
-            if (time() - filemtime($localPath) > 600) { // 10 minutos
-                $this->log("[WARN] Arquivo wzp.json desatualizado (>10min). Abortando para evitar duplicatas.");
-                return;
+        // 1. VATSIM V3 Data
+        echo "[INFO] Baixando dados da VATSIM (v3)...\n";
+        $vatsimJson = @file_get_contents('https://data.vatsim.net/v3/vatsim-data.json');
+        if ($vatsimJson) {
+            $vatsimData = json_decode($vatsimJson, true);
+            if (isset($vatsimData['pilots']) && is_array($vatsimData['pilots'])) {
+                foreach ($vatsimData['pilots'] as $p) {
+                    $this->pilotsOnline[] = [
+                        'network' => 'VATSIM',
+                        'id' => $p['cid'],
+                        'callsign' => $p['callsign'],
+                        'flightPlan' => [
+                            'departureId' => $p['flight_plan']['departure'] ?? '',
+                            'arrivalId' => $p['flight_plan']['arrival'] ?? '',
+                            'aircraft' => ['icaoCode' => $p['flight_plan']['aircraft_short'] ?? '']
+                        ],
+                        'lastTrack' => [
+                            'latitude' => $p['latitude'],
+                            'longitude' => $p['longitude'],
+                            'altitude' => $p['altitude'],
+                            'groundSpeed' => $p['groundspeed'],
+                            'heading' => $p['heading'],
+                            'onGround' => ($p['groundspeed'] < 40), // Inferido
+                            'state' => ($p['groundspeed'] < 40) ? 'Boarding' : 'En Route'
+                        ]
+                    ];
+                }
+                echo "    -> " . count($vatsimData['pilots']) . " pilotos VATSIM processados.\n";
             }
+        } else {
+            $this->log("[WARN] Falha ao baixar feed da VATSIM.");
+        }
 
-            $jsonData = file_get_contents($localPath);
-            $data = json_decode($jsonData, true);
+        // 2. IVAO V2 Tracker Data
+        echo "[INFO] Baixando dados da IVAO (v2 Tracker)...\n";
+        $ivaoJson = @file_get_contents('https://api.ivao.aero/v2/tracker/whazzup');
+        if ($ivaoJson) {
+            $ivaoData = json_decode($ivaoJson, true);
+            // Verifica se retornou lista direta ou objeto
+            $clients = (isset($ivaoData['clients']['pilots'])) ? $ivaoData['clients']['pilots'] : (is_array($ivaoData) ? $ivaoData : []);
             
-            if (is_array($data)) {
-                if (isset($data[0]['callsign']) || isset($data[0]['id'])) {
-                    $this->pilotsOnline = $data;
-                } elseif (isset($data['clients']['pilots'])) {
-                    $this->pilotsOnline = $data['clients']['pilots'];
+            $countIvao = 0;
+            foreach ($clients as $p) {
+                // Filtra apenas pilotos, caso venha misturado (ATC/Observer)
+                // Na API whazzup v2 usually vem tudo junto ou separado por endpoint. 
+                // Assumindo lista de clientes padrão whazzup
+                if (isset($p['pilotSession']) || (isset($p['type']) && $p['type'] == 'pilot')) {
+                    // Normalização mínima, pois a estrutura já é a esperada pelo script
+                    $p['network'] = 'IVAO';
+                    $this->pilotsOnline[] = $p;
+                    $countIvao++;
                 }
             }
-            
-            echo "[INFO] Analisando tráfego global (" . count($this->pilotsOnline) . " aeronaves no radar)...\n";
+            echo "    -> " . $countIvao . " pilotos IVAO processados.\n";
         } else {
-            $this->log("[WARN] Arquivo wzp.json não encontrado em: $localPath");
-            return;
+            $this->log("[WARN] Falha ao baixar feed da IVAO.");
         }
+
+        echo "[INFO] Total no Radar Combinado: " . count($this->pilotsOnline) . " aeronaves.\n";
     }
 
     public function runValidation() {
@@ -172,7 +209,7 @@ class FlightValidator {
         // Valida Callsign
         $dbCallsign = strtoupper($pilotData[$this->colMatricula] ?? $pilotData['matricula'] ?? '');
         if ($liveCallsign !== $dbCallsign) {
-             // Debug Opcional: echo "Callsign mismatch: $liveCallsign vs $dbCallsign\n";
+             echo "Callsign mismatch: Live [$liveCallsign] vs DB [$dbCallsign] (NetworkID: $networkId)\n";
              return;
         }
 

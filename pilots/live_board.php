@@ -338,15 +338,23 @@ if (file_exists($jsonPath)) {
     flights.forEach(function(f) {
         if(f.lat !== null && f.lon !== null && f.lat !== "" && f.lon !== "") {
             
-            // Lógica de Ícones
+            // Lógica de Ícones e Tamanho Dinâmico
             var code = f.acft.split('/')[0].toUpperCase();
             var iconHtml = '';
             var rotOffset = 0;
             var isSVG = false;
             
-            // 1. Helicópteros
+            // Definição de Tamanho Baseado na Altitude
+            // Solo (<500ft): 10px (Bem pequeno para não poluir)
+            // Cruzeiro (>20000ft): 22px
+            var currentSize = 10; // Default Ground Size
+            if (f.alt > 500) {
+                var factor = Math.min(f.alt / 20000, 1); // 0 a 1
+                currentSize = 10 + (factor * 12); // De 10 até 22
+            }
+            
+            // Ícones
             var helis = ['H125','H135','H145','R44','R22','R66','AS35','EC12','EC13','BK11','B206','B407','UH1','H500','MD50','CABRI'];
-            // 2. Aviação Geral (Pequeno Porte)
             var ga_planes = ['C172','C152','C182','PA28','SR22','DA40','DA62','C208','BE58','PA34','PA46','M20','C150','C310','B350','P28A'];
             
             var color = '#fbbf24'; 
@@ -354,29 +362,28 @@ if (file_exists($jsonPath)) {
             if(f.status_class === 'status-landed') color = '#ef4444'; 
 
             if (helis.some(h => code.includes(h))) {
-                // Helicóptero (FontAwesome)
+                // Helicóptero
                 var rot = f.hdg - 90;
-                iconHtml = '<i class="fa-solid fa-helicopter" style="transform: rotate('+rot+'deg); display:block; width:100%; height:100%; text-align:center; line-height:20px; color: '+color+'; text-shadow: 0 0 5px '+color+';"></i>';
+                iconHtml = '<i class="fa-solid fa-helicopter" style="transform: rotate('+rot+'deg); display:block; width:100%; height:100%; text-align:center; line-height:'+currentSize+'px; font-size:'+currentSize+'px; color: '+color+'; text-shadow: 0 0 5px '+color+';"></i>';
             } else if (ga_planes.some(g => code.includes(g))) {
-                // GA Plane (Custom SVG - Cessna Style)
-                // Ícone SVG apontando para CIMA (0 graus)
+                // GA Plane
                 isSVG = true;
-                var svgPath = "M12 2 L14 8 L22 8 L22 11 L14 11 L13 20 L16 22 L8 22 L11 20 L10 11 L2 11 L2 8 L10 8 L12 2 Z"; // Simple GA shape
+                var svgPath = "M12 2 L14 8 L22 8 L22 11 L14 11 L13 20 L16 22 L8 22 L11 20 L10 11 L2 11 L2 8 L10 8 L12 2 Z";
                 iconHtml = `<svg viewBox="0 0 24 24" style="transform: rotate(${f.hdg}deg); filter: drop-shadow(0 0 3px ${color}); width:100%; height:100%;" fill="${color}">
                                 <path d="${svgPath}" />
                             </svg>`;
             } else {
-                // Airliner / Genérico (FontAwesome)
+                // Airliner
                 var rot = f.hdg - 45;
-                iconHtml = '<i class="fa-solid fa-plane" style="transform: rotate('+rot+'deg); display:block; width:100%; height:100%; text-align:center; line-height:20px; color: '+color+'; text-shadow: 0 0 5px '+color+';"></i>';
+                iconHtml = '<i class="fa-solid fa-plane" style="transform: rotate('+rot+'deg); display:block; width:100%; height:100%; text-align:center; line-height:'+currentSize+'px; font-size:'+currentSize+'px; color: '+color+'; text-shadow: 0 0 5px '+color+';"></i>';
             }
             
             var planeIcon = L.divIcon({
                 html: iconHtml,
                 className: 'custom-plane-icon',
-                iconSize: [20, 20],
-                iconAnchor: [10, 10],
-                popupAnchor: [0, -50]
+                iconSize: [currentSize, currentSize],
+                iconAnchor: [currentSize/2, currentSize/2],
+                popupAnchor: [0, -20]
             });
 
             
