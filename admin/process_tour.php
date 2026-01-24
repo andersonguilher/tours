@@ -209,6 +209,23 @@ if ($action == 'delete') {
         // Transação para garantir limpeza completa
         $pdo->beginTransaction();
         
+        // 0. Recuperar e Deletar a Imagem (Banner)
+        $stmt = $pdo->prepare("SELECT banner_url FROM tour_tours WHERE id = ?");
+        $stmt->execute([$id]);
+        $tour = $stmt->fetch();
+        
+        if ($tour && !empty($tour['banner_url'])) {
+            // Caminho relativo salvo no banco (ex: ../assets/banners/arquivo.jpg)
+            // __DIR__ é /admin, então __DIR__ . '/' . $bannerPath deve resolver para o arquivo correto
+            $bannerFile = __DIR__ . '/' . $tour['banner_url'];
+            
+            // Verifica se é um arquivo local e se existe antes de tentar deletar
+            // Evita deletar placeholders externos ou causar erros
+            if (file_exists($bannerFile) && is_file($bannerFile)) {
+                unlink($bannerFile);
+            }
+        }
+        
         // 1. Remove histórico e progresso dos pilotos neste tour
         // ATUALIZADO: tabelas tour_history e tour_progress
         $pdo->prepare("DELETE FROM tour_history WHERE tour_id = ?")->execute([$id]); 
@@ -218,13 +235,16 @@ if ($action == 'delete') {
         // ATUALIZADO: tabela tour_legs
         $pdo->prepare("DELETE FROM tour_legs WHERE tour_id = ?")->execute([$id]);
         
-        // 3. Remove o tour em si
+        // 3. Remove sessões ao vivo (sem FK no banco)
+        $pdo->prepare("DELETE FROM tour_live_sessions WHERE tour_id = ?")->execute([$id]);
+        
+        // 4. Remove o tour em si
         // ATUALIZADO: tabela tour_tours
         $pdo->prepare("DELETE FROM tour_tours WHERE id = ?")->execute([$id]);
         
         $pdo->commit();
         
-        header("Location: index.php");
+        header("Location: index.php?msg=deleted");
         exit;
 
     } catch (PDOException $e) {
