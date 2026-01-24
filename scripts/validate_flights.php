@@ -124,9 +124,15 @@ class FlightValidator {
             $vatsimData = json_decode($vatsimJson, true);
             if (isset($vatsimData['pilots']) && is_array($vatsimData['pilots'])) {
                 foreach ($vatsimData['pilots'] as $p) {
+                    // FILTER: Only add if Pilot is in our Active Tours list
+                    $cid = $p['cid'];
+                    if (!isset($this->knownPilots['VATSIM:' . $cid])) {
+                        continue; 
+                    }
+
                     $this->pilotsOnline[] = [
                         'network' => 'VATSIM',
-                        'id' => $p['cid'],
+                        'id' => $cid,
                         'callsign' => $p['callsign'],
                         'flightPlan' => [
                             'departureId' => $p['flight_plan']['departure'] ?? '',
@@ -139,13 +145,13 @@ class FlightValidator {
                             'altitude' => $p['altitude'],
                             'groundSpeed' => $p['groundspeed'],
                             'heading' => $p['heading'],
-                            'onGround' => ($p['groundspeed'] < 40), // Inferido
+                            'onGround' => ($p['groundspeed'] < 40), 
                             'state' => ($p['groundspeed'] < 40) ? 'Boarding' : 'En Route'
                         ]
                     ];
                 }
-                echo "    -> " . count($vatsimData['pilots']) . " pilotos VATSIM processados.\n";
             }
+            echo "    -> Processado. (Filtrado por Active Tours)\n";
         } else {
             $this->log("[WARN] Falha ao baixar feed da VATSIM.");
         }
@@ -155,27 +161,26 @@ class FlightValidator {
         $ivaoJson = @file_get_contents('https://api.ivao.aero/v2/tracker/whazzup');
         if ($ivaoJson) {
             $ivaoData = json_decode($ivaoJson, true);
-            // Verifica se retornou lista direta ou objeto
             $clients = (isset($ivaoData['clients']['pilots'])) ? $ivaoData['clients']['pilots'] : (is_array($ivaoData) ? $ivaoData : []);
             
-            $countIvao = 0;
             foreach ($clients as $p) {
-                // Filtra apenas pilotos, caso venha misturado (ATC/Observer)
-                // Na API whazzup v2 usually vem tudo junto ou separado por endpoint. 
-                // Assumindo lista de clientes padrão whazzup
+                // Filter Logic
+                $vid = $p['userId'] ?? $p['id'] ?? 0;
+                if (!isset($this->knownPilots['IVAO:' . $vid])) {
+                    continue;
+                }
+
                 if (isset($p['pilotSession']) || (isset($p['type']) && $p['type'] == 'pilot')) {
-                    // Normalização mínima, pois a estrutura já é a esperada pelo script
                     $p['network'] = 'IVAO';
                     $this->pilotsOnline[] = $p;
-                    $countIvao++;
                 }
             }
-            echo "    -> " . $countIvao . " pilotos IVAO processados.\n";
+            echo "    -> Processado. (Filtrado por Active Tours)\n";
         } else {
             $this->log("[WARN] Falha ao baixar feed da IVAO.");
         }
 
-        echo "[INFO] Total no Radar Combinado: " . count($this->pilotsOnline) . " aeronaves.\n";
+        echo "[INFO] Pilotos da Companhia no Radar: " . count($this->pilotsOnline) . "\n";
     }
 
     public function runValidation() {
