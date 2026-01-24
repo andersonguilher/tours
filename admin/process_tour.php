@@ -42,14 +42,9 @@ function uploadBanner($fileInputName) {
 
     if (isset($_FILES[$fileInputName]) && $_FILES[$fileInputName]['error'] == 0) {
         $fileTmpPath = $_FILES[$fileInputName]['tmp_name'];
-        $fileSize    = $_FILES[$fileInputName]['size'];
+        //$fileSize    = $_FILES[$fileInputName]['size']; // Removida verificação restrita de 2MB
         
-        // 1. Validar Tamanho (Limite de 2MB)
-        if ($fileSize > 2 * 1024 * 1024) {
-            wp_die('Erro: O banner é muito grande. Máximo permitido: 2MB.');
-        }
-
-        // 2. Validar Tipo MIME Real (Evita arquivos maliciosos renomeados)
+        // 1. Validar Tipo MIME Real
         $finfo = new finfo(FILEINFO_MIME_TYPE);
         $mimeType = $finfo->file($fileTmpPath);
 
@@ -63,16 +58,65 @@ function uploadBanner($fileInputName) {
             wp_die('Erro: Formato de imagem inválido. Use apenas JPG, PNG ou WEBP.');
         }
 
-        // 3. Gerar Nome Único e Seguro
+        // 2. Gerar Nome e Caminho
         $extension = $allowedMimeTypes[$mimeType];
         $newFileName = 'tour_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
         $dest_path = $targetDir . $newFileName;
 
-        if(move_uploaded_file($fileTmpPath, $dest_path)) {
-            // Retorna caminho relativo para salvar no banco
+        // 3. Processamento de Imagem (Redimensionar e Comprimir)
+        // Aumenta o limite de memória temporariamente para processar imagens grandes
+        ini_set('memory_limit', '256M');
+
+        list($width, $height) = getimagesize($fileTmpPath);
+        $maxWidth = 1920;
+        
+        // Carrega a imagem original
+        switch ($mimeType) {
+            case 'image/jpeg': $sourceImage = imagecreatefromjpeg($fileTmpPath); break;
+            case 'image/png':  $sourceImage = imagecreatefrompng($fileTmpPath); break;
+            case 'image/webp': $sourceImage = imagecreatefromwebp($fileTmpPath); break;
+            default: return null;
+        }
+
+        if (!$sourceImage) {
+            wp_die('Erro ao processar a imagem. O arquivo pode estar corrompido.');
+        }
+
+        // Se for maior que 1920px, redimensiona
+        if ($width > $maxWidth) {
+            $newWidth = $maxWidth;
+            $newHeight = floor($height * ($maxWidth / $width));
+            
+            $finalImage = imagecreatetruecolor($newWidth, $newHeight);
+            
+            // Preservar transparência (PNG/WebP)
+            if ($mimeType == 'image/png' || $mimeType == 'image/webp') {
+                imagealphablending($finalImage, false);
+                imagesavealpha($finalImage, true);
+                $transparent = imagecolorallocatealpha($finalImage, 255, 255, 255, 127);
+                imagefilledrectangle($finalImage, 0, 0, $newWidth, $newHeight, $transparent);
+            }
+
+            imagecopyresampled($finalImage, $sourceImage, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+            imagedestroy($sourceImage); // Libera original
+        } else {
+            $finalImage = $sourceImage;
+        }
+
+        // Salva a imagem otimizada
+        $saved = false;
+        switch ($mimeType) {
+            case 'image/jpeg': $saved = imagejpeg($finalImage, $dest_path, 85); break; // Qualidade 85
+            case 'image/png':  $saved = imagepng($finalImage, $dest_path, 8); break;  // Compressão 8 (0-9)
+            case 'image/webp': $saved = imagewebp($finalImage, $dest_path, 85); break; // Qualidade 85
+        }
+        
+        imagedestroy($finalImage);
+
+        if ($saved) {
             return "../assets/banners/" . $newFileName;
         } else {
-            wp_die('Erro ao salvar o arquivo. Verifique as permissões da pasta assets/banners.');
+            wp_die('Erro ao salvar o arquivo processado. Verifique as permissões da pasta.');
         }
     }
     return null;
