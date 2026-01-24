@@ -24,6 +24,18 @@ class FlightValidator {
     private $arrivalChecksRequired = 2; // Reduzido para 2 mins (antes 3)
     private $landingSpeedThreshold = 10; // Aumentado para 10kts (antes 5)
 
+    // Helper: Distância em Milhas Náuticas
+    private function calculateDistance($lat1, $lon1, $lat2, $lon2) {
+        if ($lat1 == 0 || $lon1 == 0 || $lat2 == 0 || $lon2 == 0) return 9999;
+        
+        $theta = $lon1 - $lon2;
+        $dist = sin(deg2rad($lat1)) * sin(deg2rad($lat2)) +  cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * cos(deg2rad($theta));
+        $dist = acos($dist);
+        $dist = rad2deg($dist);
+        $miles = $dist * 60 * 1.1515;
+        return ($miles * 0.8684); // Retorna em Milhas Náuticas
+    }
+
     public function __construct($pdoTracker) {
         $this->pdoTracker = $pdoTracker;
         $this->loadSettings();
@@ -211,15 +223,17 @@ class FlightValidator {
         
         $pilotData = $this->knownPilots[$cacheKey];
 
-        // Valida Callsign
-        $dbCallsign = strtoupper($pilotData[$this->colMatricula] ?? $pilotData['matricula'] ?? '');
-        if ($liveCallsign !== $dbCallsign) {
-             echo "Callsign mismatch: Live [$liveCallsign] vs DB [$dbCallsign] (NetworkID: $networkId)\n";
-             return;
-        }
+        // Callsign Check REMOVIDA
+        // if ($liveCallsign !== $dbCallsign) { ... }
 
-        $pilotId = $pilotData['post_id'] ?? $pilotData[$this->colPilotId] ?? null;
-        if (!$pilotId) return;
+        // CORREÇÃO CRÍTICA: Priorizar 'id_piloto' (ID interno numérico) em vez de 'post_id'
+        // A tabela tour_progress usa o id_piloto (ex: 24), não o post_id (ex: 1255).
+        $pilotId = $pilotData[$this->colPilotId] ?? $pilotData['id_piloto'] ?? $pilotData['post_id'] ?? null;
+        
+        if (!$pilotId) {
+            echo " [ERRO] Piloto encontrado mas sem ID válido no array de dados.\n";
+            return;
+        }
 
         // Dados de Telemetria
         $flightPlan = $flight['flightPlan'] ?? null;
@@ -234,14 +248,18 @@ class FlightValidator {
             'aircraft'       => $flightPlan['aircraft']['icaoCode'] ?? ($flightPlan['aircraftId'] ?? ''),
             'state'          => $lastTrack['state'] ?? '', 
             'groundspeed'    => $lastTrack['groundSpeed'] ?? 0,
+            'lat'            => $lastTrack['latitude'] ?? 0,
+            'lon'            => $lastTrack['longitude'] ?? 0,
             'network'        => $network
         ];
 
         // Busca Perna Ativa (Esta query é leve pois só roda se o piloto for identificado)
         $activeLeg = $this->getActiveLeg($pilotId);
         if ($activeLeg) {
-            echo " -> [Rastreando] {$liveCallsign} (ID: $pilotId) na perna {$activeLeg['leg_dep']} -> {$activeLeg['leg_arr']}\n";
+            echo " -> [DEBUG] Piloto identificado (ID: $pilotId). Tentando validar sessão para leg {$activeLeg['leg_dep']} -> {$activeLeg['leg_arr']}\n";
             $this->manageFlightSession($pilotId, $activeLeg, $telemetry);
+        } else {
+            echo " -> [DEBUG] Piloto online, mas NENHUMA perna ativa encontrada no DB para ID: $pilotId\n";
         }
     }
 
@@ -249,7 +267,10 @@ class FlightValidator {
 
     private function manageFlightSession($pilotId, $legData, $telemetry) {
         // Validação básica de Rota e Aeronave antes de processar sessão
+        echo "    -> [DEBUG] Comparando Rota: Voo [{$telemetry['dep_icao']}->{$telemetry['arr_icao']}] vs Leg [{$legData['leg_dep']}->{$legData['leg_arr']}]\n";
+        
         if ($telemetry['dep_icao'] != $legData['leg_dep'] || $telemetry['arr_icao'] != $legData['leg_arr']) {
+            echo "    -> [DEBUG] Rota INVÁLIDA. Ignorando.\n";
             return; // Voo não corresponde à perna ativa
         }
 
@@ -277,23 +298,57 @@ class FlightValidator {
             $this->updateSessionHeartbeat($pilotId);
 
             // VERIFICAÇÃO DE CHEGADA (Debounce)
-            // Se estiver no destino E velocidade < 5kts (parado)
+            // 1. ICAO do destino bate
+            // 2. Velocidade < Threshold (Parado)
             if ($telemetry['arr_icao'] == $legData['leg_arr'] && $telemetry['groundspeed'] < $this->landingSpeedThreshold) {
                 
-                $checks = $session['arrival_checks'] + 1;
-                $this->updateArrivalChecks($pilotId, $checks);
-                echo "    -> Validando chegada ({$checks}/{$this->arrivalChecksRequired})...\n";
+                // 3. VERIFICAÇÃO GEOGRÁFICA (Geofencing)
+                // Se tivermos as coordenadas do aeroporto no banco, verificamos a distãncia
+                $isAtAirport = true; // Assume true se não tiver coords
+                $distMsg = "";
 
-                if ($checks >= $this->arrivalChecksRequired) {
-                    // CALCULAR TEMPO REAL DE VOO
-                    $startTime = strtotime($session['start_time']);
-                    $durationMinutes = round((time() - $startTime) / 60);
-
-                    // COMPLETAR PERNA
-                    $this->completeLeg($legData, $telemetry, $pilotId, $durationMinutes);
+                if (!empty($legData['arr_lat']) && !empty($legData['arr_lon'])) {
+                    $distance = $this->calculateDistance(
+                        $telemetry['lat'], 
+                        $telemetry['lon'], 
+                        $legData['arr_lat'], 
+                        $legData['arr_lon']
+                    );
                     
-                    // LIMPAR SESSÃO
-                    $this->deleteSession($pilotId);
+                    // RAIO DE TOLERÂNCIA: 5 Milhas Náuticas
+                    if ($distance > 5.0) {
+                        $isAtAirport = false;
+                        if ($session['arrival_checks'] == 0) { // Só loga no início para não spammar
+                            echo "    -> [Alerta] Piloto reportou chegada em {$telemetry['arr_icao']} mas está a " . round($distance, 1) . "nm do aeroporto. (Lat: {$telemetry['lat']}, Lon: {$telemetry['lon']})\n";
+                        }
+                    } else {
+                        $distMsg = " (Dist: " . round($distance, 1) . "nm)";
+                    }
+                }
+
+                if ($isAtAirport) {
+                    $checks = $session['arrival_checks'] + 1;
+                    $this->updateArrivalChecks($pilotId, $checks);
+                    echo "    -> Validando chegada ({$checks}/{$this->arrivalChecksRequired}){$distMsg}...\n";
+
+                    if ($checks >= $this->arrivalChecksRequired) {
+                        // CALCULAR TEMPO REAL DE VOO
+                        $startTime = strtotime($session['start_time']);
+                        $durationMinutes = round((time() - $startTime) / 60);
+
+                        // COMPLETAR PERNA
+                        $this->completeLeg($legData, $telemetry, $pilotId, $durationMinutes);
+                        
+                        // LIMPAR SESSÃO
+                        $this->deleteSession($pilotId);
+                    }
+                } else {
+                     // Está parado, com ICAO certo, mas longe fisicamente.
+                     // Reseta contador para evitar validação falsa.
+                     if ($session['arrival_checks'] > 0) {
+                        $this->updateArrivalChecks($pilotId, 0);
+                        echo "    -> Pouso invalidado por distância (Geofencing). Resetando.\n";
+                     }
                 }
 
             } else {
@@ -321,10 +376,14 @@ class FlightValidator {
     private function getActiveLeg($pilotId) {
         $sql = "
             SELECT p.id as progress_id, p.current_leg_id, t.rules_json, t.id as tour_real_id, t.title as tour_title,
-                   l.dep_icao as leg_dep, l.arr_icao as leg_arr, l.id as leg_real_id, l.leg_order
+                   l.dep_icao as leg_dep, l.arr_icao as leg_arr, l.id as leg_real_id, l.leg_order,
+                   ad.latitude_deg as dep_lat, ad.longitude_deg as dep_lon,
+                   aa.latitude_deg as arr_lat, aa.longitude_deg as arr_lon
             FROM tour_progress p
             JOIN tour_tours t ON p.tour_id = t.id
             JOIN tour_legs l ON p.current_leg_id = l.id
+            LEFT JOIN airports_2 ad ON l.dep_icao = ad.ident
+            LEFT JOIN airports_2 aa ON l.arr_icao = aa.ident
             WHERE p.pilot_id = ? AND p.status = 'In Progress'
         ";
         $stmt = $this->pdoTracker->prepare($sql);
