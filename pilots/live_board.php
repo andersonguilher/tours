@@ -114,11 +114,13 @@ if (file_exists($jsonPath)) {
 
             // 2. O piloto está voando a rota correta da perna atual?
             // (Compara o plano de voo conectado com o banco de dados)
-            if ($dep !== $expected['expected_dep'] || $arr !== $expected['expected_arr']) {
-                // Está online, mas voando outra coisa (ou inverteu rota, etc)
-                // Decisão: Não mostrar, ou mostrar como "Rota Incorreta"?
-                // USER REQUEST: "verificar se ele está conectado E executando esta leg" -> Filtrar restrito.
-                continue; 
+            $depPilot = trim(strtoupper($dep));
+            $arrPilot = trim(strtoupper($arr));
+            $depExp   = trim(strtoupper($expected['expected_dep']));
+            $arrExp   = trim(strtoupper($expected['expected_arr']));
+
+            if ($depPilot !== $depExp || $arrPilot !== $arrExp) {
+                 continue; // FILTRO RIGOROSO: Rota não bate com a perna ativa -> Esconde.
             }
 
             // Se passou, é um voo válido de tour!
