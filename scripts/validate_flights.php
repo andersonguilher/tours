@@ -288,6 +288,17 @@ class FlightValidator {
         // Busca Sessão Ativa na Memória (DB)
         $session = $this->getSession($pilotId, $legData['tour_real_id'], $legData['leg_real_id']);
 
+        // Verifica se a sessão está "velha" (Ex: crash do sim ou desconexão longa)
+        // Se o heartbeat (last_seen) for maior que 30 minutos atrás, reinicia a contagem.
+        if ($session) {
+            $inactiveSeconds = time() - strtotime($session['last_seen']);
+            if ($inactiveSeconds > 1800) { // 30 minutos de tolerância
+                echo "    -> [INFO] Sessão expirada (Inativo por " . round($inactiveSeconds / 60) . " min). Reiniciando sessão.\n";
+                $this->deleteSession($pilotId);
+                $session = null;
+            }
+        }
+
         if (!$session) {
             // INICIAR NOVA SESSÃO
             // Cria apenas se estiver voando ou no solo do aeroporto de saída
